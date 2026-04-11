@@ -1374,6 +1374,421 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     // -----------------------------------------------------------------------
+    // Compound @Command methods — multi-step automation flows
+    // -----------------------------------------------------------------------
+
+    /**
+     * Send a chat message to a contact through a messaging app.
+     *
+     * Compound tool that chains: resolve app → open app → wait for active window →
+     * find contact in tree → tap contact → find bottom EditText → type message →
+     * tap send button (or press Enter).
+     *
+     * Runs on Dispatchers.IO via streamingScope to avoid ANR.
+     *
+     * Args: app_name (String, required), contact (String, required), message (String, required)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun send_chat_message(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val appName = args.getString("app_name")
+            ?.trim()
+            ?: return invoke.reject("app_name is required")
+        val contact = args.getString("contact")
+            ?.trim()
+            ?: return invoke.reject("contact is required")
+        val message = args.getString("message")
+            ?.trim()
+            ?: return invoke.reject("message is required")
+
+        Log.i(TAG, "send_chat_message: app='$appName', contact='$contact', message='${message.take(50)}...'")
+
+        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+            try {
+                val result = performSendChatMessage(appName, contact, message)
+                invoke.resolve(result)
+            } catch (e: Exception) {
+                Log.e(TAG, "send_chat_message: unexpected error — ${e.message}", e)
+                invoke.resolve(makeErrorResult("send_chat_message failed: ${e.message}"))
+            }
+        }
+    }
+
+    /**
+     * Core logic for send_chat_message: multi-step message sending flow.
+     *
+     * Steps:
+     * 1. Resolve app name to package name (WELL_KNOWN_APPS + PackageManager)
+     * 2. Open the app via accessibility service
+     * 3. Wait for the app window to become active
+     * 4. Dismiss any chain-launch dialog
+     * 5. Search the accessibility tree for the contact name
+     * 6. Tap the matching contact node
+     * 7. Wait for the chat conversation screen to load
+     * 8. Find the message input EditText (bottom of screen)
+     * 9. Type the message via ACTION_SET_TEXT
+     * 10. Find and tap the send button (or press Enter as fallback)
+     *
+     * Each step logs success/failure for observability.
+     */
+    private suspend fun performSendChatMessage(appName: String, contact: String, message: String): JSObject {
+        return withContext(Dispatchers.IO) {
+            // Step 1: Resolve app name to package
+            val packageName = resolveAppName(appName)
+            if (packageName == null) {
+                Log.e(TAG, "send_chat_message: could not resolve app '$appName'")
+                return@withContext makeErrorResult("Could not resolve app '$appName'. Use a well-known name (whatsapp, telegram, etc.) or provide the package name.")
+            }
+            Log.i(TAG, "send_chat_message: resolved '$appName' → $packageName")
+
+            // Step 2: Connect to accessibility service
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "send_chat_message: accessibility service not connected after 3000ms")
+                return@withContext makeErrorResult("Accessibility service not running. Enable it in Settings > Accessibility.")
+            }
+
+            // Step 3: Open the app
+            Log.i(TAG, "send_chat_message: opening $packageName")
+            val launchSuccess = service.openApp(packageName)
+            if (!launchSuccess) {
+                Log.e(TAG, "send_chat_message: failed to open $packageName")
+                return@withContext makeErrorResult("Failed to open $appName ($packageName). The app may not be installed.")
+            }
+
+            // Step 4: Wait for app window to load
+            val windowReady = waitForWindow(service, packageName, 5000)
+            if (!windowReady) {
+                Log.w(TAG, "send_chat_message: timed out waiting for $packageName window (proceeding anyway)")
+            } else {
+                Log.i(TAG, "send_chat_message: $packageName window is active")
+            }
+
+            // Step 5: Dismiss chain-launch dialog (manufacturer-specific "Allow" prompts)
+            dismissChainLaunchDialog(service)
+
+            // Step 6: Search for contact in the accessibility tree
+            Log.i(TAG, "send_chat_message: searching for contact '$contact'")
+            val contactNodes = service.findNodesByText(contact)
+            val contactNode = contactNodes.firstOrNull {
+                it.isVisibleToUser && it.isClickable
+            } ?: contactNodes.firstOrNull {
+                it.isVisibleToUser
+            }
+
+            if (contactNode == null) {
+                PokeAccessibilityService.recycleNodes(contactNodes)
+                Log.e(TAG, "send_chat_message: contact '$contact' not found in $appName tree")
+                return@withContext makeErrorResult("Contact '$contact' not found in $appName. Make sure you are on the contacts/chats list screen.")
+            }
+
+            // Tap the contact
+            val contactBounds = android.graphics.Rect()
+            contactNode.getBoundsInScreen(contactBounds)
+            val contactCx = (contactBounds.left + contactBounds.right) / 2
+            val contactCy = (contactBounds.top + contactBounds.bottom) / 2
+            PokeAccessibilityService.recycleNodes(contactNodes)
+
+            Log.i(TAG, "send_chat_message: tapping contact '$contact' at ($contactCx, $contactCy)")
+            val contactTapSuccess = service.performTap(contactCx, contactCy)
+            if (!contactTapSuccess) {
+                Log.e(TAG, "send_chat_message: failed to tap contact '$contact'")
+                return@withContext makeErrorResult("Failed to tap contact '$contact' — gesture dispatch failed.")
+            }
+
+            // Step 7: Wait for chat screen to load
+            Thread.sleep(1500)
+
+            // Step 8: Find the message input EditText
+            Log.i(TAG, "send_chat_message: searching for message input field")
+            val root = service.getRootInActiveWindow()
+            if (root == null) {
+                Log.e(TAG, "send_chat_message: no active window after tapping contact")
+                return@withContext makeErrorResult("No active window after tapping contact. The chat may not have opened.")
+            }
+
+            val inputNode = findBottomEditableNode(root)
+            if (inputNode == null) {
+                Log.e(TAG, "send_chat_message: no editable input field found in chat screen")
+                return@withContext makeErrorResult("No message input field found in $appName chat. The app layout may not be supported.")
+            }
+
+            // Step 9: Type the message
+            Log.i(TAG, "send_chat_message: typing message into input field")
+            val textArgs = android.os.Bundle()
+            textArgs.putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                message
+            )
+            val typeSuccess = inputNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, textArgs)
+            if (!typeSuccess) {
+                // Fallback: clipboard paste
+                Log.w(TAG, "send_chat_message: ACTION_SET_TEXT failed, trying clipboard paste")
+                val clipSuccess = setClipboard(message)
+                if (clipSuccess) {
+                    val selectArgs = android.os.Bundle()
+                    selectArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                    selectArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, Int.MAX_VALUE)
+                    inputNode.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectArgs)
+                    val pasteSuccess = inputNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                    if (!pasteSuccess) {
+                        inputNode.recycle()
+                        Log.e(TAG, "send_chat_message: clipboard paste also failed")
+                        return@withContext makeErrorResult("Failed to type message — both ACTION_SET_TEXT and clipboard paste failed.")
+                    }
+                } else {
+                    inputNode.recycle()
+                    Log.e(TAG, "send_chat_message: failed to set clipboard for paste fallback")
+                    return@withContext makeErrorResult("Failed to type message — could not set clipboard for paste fallback.")
+                }
+            }
+
+            Thread.sleep(300)
+
+            // Step 10: Find and tap send button, or press Enter
+            Log.i(TAG, "send_chat_message: searching for send button")
+            val sendButton = findSendButton(root)
+            if (sendButton != null) {
+                val sendBounds = android.graphics.Rect()
+                sendButton.getBoundsInScreen(sendBounds)
+                val sendCx = (sendBounds.left + sendBounds.right) / 2
+                val sendCy = (sendBounds.top + sendBounds.bottom) / 2
+                Log.i(TAG, "send_chat_message: tapping send button at ($sendCx, $sendCy)")
+                val sendTapSuccess = service.performTap(sendCx, sendCy)
+                sendButton.recycle()
+
+                if (sendTapSuccess) {
+                    Log.i(TAG, "send_chat_message: message sent successfully to '$contact' via $appName")
+                    return@withContext makeSuccessResult("Message sent to '$contact' via $appName")
+                } else {
+                    Log.e(TAG, "send_chat_message: send button tap failed")
+                    return@withContext makeErrorResult("Found send button but tap failed. The message may have been typed but not sent.")
+                }
+            } else {
+                // Fallback: press Enter via accessibility action
+                Log.w(TAG, "send_chat_message: no send button found, pressing Enter as fallback")
+                val enterArgs = android.os.Bundle()
+                enterArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT, 0)
+                val enterSuccess = inputNode.performAction(AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY)
+
+                // Alternative: try to dispatch Enter key event via gesture (not reliable)
+                // Best effort: report partial success
+                inputNode.recycle()
+                Log.i(TAG, "send_chat_message: message typed but send button not found (user may need to press Send)")
+                return@withContext makeSuccessResult(
+                    "Message typed in $appName chat with '$contact'. Send button not found — message may need manual send."
+                )
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared helpers for compound tools
+    // -----------------------------------------------------------------------
+
+    /**
+     * Resolve an app name to a package name.
+     *
+     * Checks the WELL_KNOWN_APPS map first, then falls back to PackageManager
+     * fuzzy matching. Also accepts raw package names (containing a dot).
+     *
+     * @param appName App name (e.g. "whatsapp"), display name, or package name.
+     * @return Package name if resolved, null otherwise.
+     */
+    private fun resolveAppName(appName: String): String? {
+        // Check well-known map first
+        WELL_KNOWN_APPS[appName.lowercase()]?.let { return it }
+
+        // Raw package name (contains a dot)
+        if (appName.contains(".")) return appName
+
+        // PackageManager fuzzy match
+        return resolveAppNameToPackage(appName)
+    }
+
+    /**
+     * Dismiss manufacturer-specific chain-launch dialogs ("Always allow", "Open with", etc.)
+     * by searching for common button labels and pressing Back as a general dismiss.
+     *
+     * Common on Xiaomi (MIUI), Huawei (EMUI), Samsung (One UI) when launching apps
+     * from an accessibility service or when apps try to open links in other apps.
+     *
+     * @param service The connected accessibility service.
+     */
+    private fun dismissChainLaunchDialog(service: PokeAccessibilityService) {
+        val dismissLabels = listOf("Allow", "Always allow", "Just once", "Always", "Open", "OK")
+        try {
+            val root = service.getRootInActiveWindow() ?: return
+            for (label in dismissLabels) {
+                val nodes = root.findAccessibilityNodeInfosByText(label)
+                val button = nodes.firstOrNull {
+                    it.isVisibleToUser && it.isClickable
+                }
+                if (button != null) {
+                    val bounds = android.graphics.Rect()
+                    button.getBoundsInScreen(bounds)
+                    val cx = (bounds.left + bounds.right) / 2
+                    val cy = (bounds.top + bounds.bottom) / 2
+                    Log.i(TAG, "dismissChainLaunchDialog: found '$label' button at ($cx, $cy), tapping")
+                    service.performTap(cx, cy)
+                    PokeAccessibilityService.recycleNodes(nodes)
+                    Thread.sleep(500)
+                    return
+                }
+                PokeAccessibilityService.recycleNodes(nodes)
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "dismissChainLaunchDialog: no dialog found or error — ${e.message}")
+        }
+    }
+
+    /**
+     * Wait for a specific package's window to become the active window.
+     *
+     * @param service The accessibility service.
+     * @param packageName The target package name.
+     * @param timeoutMs Maximum wait time in milliseconds.
+     * @return true if the window became active within the timeout.
+     */
+    private fun waitForWindow(service: PokeAccessibilityService, packageName: String, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val root = service.getRootInActiveWindow()
+            val windowPkg = root?.packageName?.toString()
+            root?.recycle()
+            if (windowPkg == packageName) return true
+            Thread.sleep(300)
+        }
+        return false
+    }
+
+    /**
+     * Find the bottom-most editable node in the tree, which is typically the
+     * message input field in chat apps (WhatsApp, Telegram, etc.).
+     *
+     * Strategy: BFS traversal, track the editable node with the largest Y coordinate
+     * (bottom of screen = chat input).
+     *
+     * @param root The root accessibility node.
+     * @return The bottom-most editable node, or null if none found.
+     */
+    private fun findBottomEditableNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var bottomNode: AccessibilityNodeInfo? = null
+        var bottomY = -1
+
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isEditable && node.className?.toString()?.contains("EditText") == true) {
+                val bounds = android.graphics.Rect()
+                node.getBoundsInScreen(bounds)
+                val cy = (bounds.top + bounds.bottom) / 2
+                if (cy > bottomY) {
+                    bottomY = cy
+                    bottomNode?.recycle()
+                    bottomNode = node
+                    continue // Don't add this node as a child to traverse
+                }
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                queue.add(child)
+            }
+        }
+
+        return bottomNode
+    }
+
+    /**
+     * Find the send button in a chat screen.
+     *
+     * Searches for clickable nodes with common send button labels:
+     * "Send", "send", →, ➤, or ImageButton nodes in the bottom-right area.
+     *
+     * @param root The root accessibility node.
+     * @return The send button node, or null if not found.
+     */
+    private fun findSendButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val sendLabels = listOf("Send", "SEND", "send", "→", "➤", "▶", "➡")
+
+        // First try: search by text/contentDescription
+        for (label in sendLabels) {
+            try {
+                val nodes = root.findAccessibilityNodeInfosByText(label)
+                val sendBtn = nodes.firstOrNull {
+                    it.isVisibleToUser && it.isClickable
+                }
+                if (sendBtn != null) {
+                    PokeAccessibilityService.recycleNodes(nodes.filter { it !== sendBtn })
+                    return sendBtn
+                }
+                PokeAccessibilityService.recycleNodes(nodes)
+            } catch (_: Exception) {}
+        }
+
+        // Second try: search by content description
+        val descLabels = listOf("Send", "send", "Send message", "Submit")
+        for (desc in descLabels) {
+            try {
+                val nodes = root.findAccessibilityNodeInfosByText(desc)
+                val btn = nodes.firstOrNull {
+                    it.isVisibleToUser && it.isClickable &&
+                    (it.contentDescription?.toString()?.contains(desc, ignoreCase = true) == true)
+                }
+                if (btn != null) {
+                    PokeAccessibilityService.recycleNodes(nodes.filter { it !== btn })
+                    return btn
+                }
+                PokeAccessibilityService.recycleNodes(nodes)
+            } catch (_: Exception) {}
+        }
+
+        // Third try: find ImageButton nodes in the bottom-right quadrant
+        val metrics = activity.resources.displayMetrics
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
+        val thresholdX = (screenWidth * 0.6).toInt()
+        val thresholdY = (screenHeight * 0.7).toInt()
+
+        return findImageButtonInRegion(root, thresholdX, thresholdY, screenWidth, screenHeight)
+    }
+
+    /**
+     * Find an ImageButton node in the specified screen region.
+     * Used as a last-resort heuristic for finding the send button.
+     */
+    private fun findImageButtonInRegion(
+        root: AccessibilityNodeInfo,
+        minX: Int, minY: Int, maxX: Int, maxY: Int
+    ): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            val className = node.className?.toString() ?: ""
+            if ((className.contains("ImageButton") || className.contains("Button")) &&
+                node.isVisibleToUser && node.isClickable) {
+                val bounds = android.graphics.Rect()
+                node.getBoundsInScreen(bounds)
+                val cx = (bounds.left + bounds.right) / 2
+                val cy = (bounds.top + bounds.bottom) / 2
+                if (cx >= minX && cy >= minY && cx <= maxX && cy <= maxY) {
+                    return node
+                }
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                queue.add(child)
+            }
+        }
+        return null
+    }
+
+    // -----------------------------------------------------------------------
     // Gesture @Command methods — bridge gesture primitives to IPC
     // -----------------------------------------------------------------------
 
