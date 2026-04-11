@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface Message {
   id: number
@@ -11,14 +12,21 @@ const messages = ref<Message[]>([])
 let nextId = 1
 
 export function useChat() {
-  function simulateReply(text: string) {
-    setTimeout(() => {
+  async function sendToAgent(text: string) {
+    try {
+      const response = await invoke<string>('chat', { message: text })
       messages.value.push({
         id: nextId++,
         role: 'ai',
-        text: `You said: ${text}`,
+        text: response,
       })
-    }, 800)
+    } catch (err) {
+      messages.value.push({
+        id: nextId++,
+        role: 'ai',
+        text: `[IPC Error] ${err}`,
+      })
+    }
   }
 
   function sendMessage(text: string) {
@@ -29,7 +37,7 @@ export function useChat() {
       role: 'user',
       text: trimmed,
     })
-    simulateReply(trimmed)
+    sendToAgent(trimmed)
   }
 
   return { messages, sendMessage }
