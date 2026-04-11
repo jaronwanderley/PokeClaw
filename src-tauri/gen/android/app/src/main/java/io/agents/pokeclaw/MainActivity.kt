@@ -1,4 +1,4 @@
-package com.tauri.dev
+package io.agents.pokeclaw
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
