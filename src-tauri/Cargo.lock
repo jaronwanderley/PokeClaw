@@ -3693,6 +3693,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-plugin",
+ "tokio",
 ]
 
 [[package]]
