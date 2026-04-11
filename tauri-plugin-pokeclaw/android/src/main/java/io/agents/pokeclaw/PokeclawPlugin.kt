@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 @TauriPlugin
 class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
@@ -47,6 +48,13 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         lateinit var message: String
         var batchSize: Int = 5
         lateinit var onEvent: Channel
+    }
+
+    /** Args class for download_model with streaming Channel for progress. */
+    @InvokeArg
+    inner class DownloadModelArgs {
+        lateinit var modelId: String
+        lateinit var onProgress: Channel
     }
 
     /** Active inference session, null when idle. */
@@ -380,6 +388,156 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
             channel.send(event)
         } catch (e: Exception) {
             Log.w(TAG, "sendErrorEvent: channel.send failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Return the catalog of available models with their download status.
+     *
+     * Returns: JSON array of { id, displayName, url, fileName, sizeBytes, minRamGb, isDownloaded, localPath }
+     */
+    @Command
+    fun list_models(invoke: Invoke) {
+        Log.i(TAG, "list_models")
+
+        try {
+            val array = app.tauri.plugin.JSArray()
+            for (model in ModelManager.AVAILABLE_MODELS) {
+                val isDownloaded = ModelManager.isModelDownloaded(activity, model)
+                val localPath = ModelManager.getModelPath(activity, model)
+
+                val obj = JSObject()
+                obj.put("id", model.id)
+                obj.put("displayName", model.displayName)
+                obj.put("url", model.url)
+                obj.put("fileName", model.fileName)
+                obj.put("sizeBytes", model.sizeBytes)
+                obj.put("minRamGb", model.minRamGb)
+                obj.put("isDownloaded", isDownloaded)
+                obj.put("localPath", localPath)
+                array.put(obj)
+
+                Log.d(TAG, "list_models: ${model.id} — isDownloaded=$isDownloaded, localPath=$localPath")
+            }
+
+            val result = JSObject()
+            result.put("models", array)
+            invoke.resolve(result)
+        } catch (e: Exception) {
+            Log.e(TAG, "list_models: failed — ${e.message}", e)
+            invoke.reject("Failed to list models: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Download a model by ID, streaming progress events via a Channel.
+     *
+     * Args (via DownloadModelArgs): modelId (String), onProgress (Channel)
+     *
+     * Channel events:
+     *   { event: "progress", data: { bytesDownloaded, totalBytes, bytesPerSecond } }
+     *   { event: "complete", data: { modelPath, fileName } }
+     *   { event: "error",    data: { message } }
+     */
+    @Command
+    fun download_model(invoke: Invoke) {
+        val args: DownloadModelArgs
+        try {
+            args = invoke.parseArgs(DownloadModelArgs::class.java)
+        } catch (e: Exception) {
+            return invoke.reject("Invalid arguments: ${e.message}", e)
+        }
+
+        val modelId = args.modelId
+        val channel = args.onProgress
+
+        Log.i(TAG, "download_model: modelId=$modelId, channelId=${channel.id}")
+
+        val model = ModelManager.getModelById(modelId)
+        if (model == null) {
+            Log.e(TAG, "download_model: unknown modelId=$modelId")
+            return invoke.reject("Unknown model ID: $modelId")
+        }
+
+        // Already downloaded? Resolve immediately.
+        val existingPath = ModelManager.getModelPath(activity, model)
+        if (existingPath != null) {
+            Log.i(TAG, "download_model: $modelId already downloaded at $existingPath")
+            val completeData = JSObject()
+            completeData.put("modelPath", existingPath)
+            completeData.put("fileName", model.fileName)
+            val completeEvent = JSObject()
+            completeEvent.put("event", "complete")
+            completeEvent.put("data", completeData)
+            try { channel.send(completeEvent) } catch (_: Exception) {}
+            invoke.resolve()
+            return
+        }
+
+        // Launch download on IO coroutine
+        kotlinx.coroutines.launch(streamingScope.coroutineContext + Dispatchers.IO) {
+            Log.i(TAG, "download_model: starting download for ${model.fileName}")
+
+            try {
+                ModelManager.downloadModel(activity, model, object : ModelManager.DownloadCallback {
+                    override fun onProgress(bytesDownloaded: Long, totalBytes: Long, bytesPerSecond: Long) {
+                        try {
+                            val data = JSObject()
+                            data.put("bytesDownloaded", bytesDownloaded)
+                            data.put("totalBytes", totalBytes)
+                            data.put("bytesPerSecond", bytesPerSecond)
+                            val event = JSObject()
+                            event.put("event", "progress")
+                            event.put("data", data)
+                            channel.send(event)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "download_model: progress channel send failed: ${e.message}")
+                        }
+                    }
+
+                    override fun onComplete(modelPath: String) {
+                        Log.i(TAG, "download_model: complete — $modelPath")
+                        try {
+                            val data = JSObject()
+                            data.put("modelPath", modelPath)
+                            data.put("fileName", model.fileName)
+                            val event = JSObject()
+                            event.put("event", "complete")
+                            event.put("data", data)
+                            channel.send(event)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "download_model: complete channel send failed: ${e.message}")
+                        }
+                        invoke.resolve()
+                    }
+
+                    override fun onError(error: String) {
+                        Log.e(TAG, "download_model: error — $error")
+                        try {
+                            val data = JSObject()
+                            data.put("message", error)
+                            val event = JSObject()
+                            event.put("event", "error")
+                            event.put("data", data)
+                            channel.send(event)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "download_model: error channel send failed: ${e.message}")
+                        }
+                        invoke.reject("Download failed: $error")
+                    }
+                })
+            } catch (e: Exception) {
+                Log.e(TAG, "download_model: unexpected error — ${e.message}", e)
+                try {
+                    val data = JSObject()
+                    data.put("message", e.message ?: "Unknown error")
+                    val event = JSObject()
+                    event.put("event", "error")
+                    event.put("data", data)
+                    channel.send(event)
+                } catch (_: Exception) {}
+                invoke.reject("Download failed: ${e.message}", e)
+            }
         }
     }
 
