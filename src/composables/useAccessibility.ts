@@ -101,5 +101,183 @@ export function useAccessibility() {
     }
   }
 
-  return { screenTree, isLoading, error, fetchScreenInfo, checkPermissions, findNodeInfo, getDeviceInfo }
+  // -----------------------------------------------------------------
+  // Gesture tool methods
+  // -----------------------------------------------------------------
+
+  /**
+   * Tap at the given screen coordinates.
+   */
+  async function tap(x: number, y: number): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('tap', { x, y })
+      if (!result.success) {
+        error.value = result.error ?? 'tap returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Swipe from one point to another.
+   */
+  async function swipe(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    durationMs?: number,
+  ): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('swipe', {
+        start_x: startX,
+        start_y: startY,
+        end_x: endX,
+        end_y: endY,
+        duration_ms: durationMs,
+      })
+      if (!result.success) {
+        error.value = result.error ?? 'swipe returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Long press at the given coordinates.
+   */
+  async function longPress(x: number, y: number, durationMs?: number): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('long_press', {
+        x,
+        y,
+        duration_ms: durationMs,
+      })
+      if (!result.success) {
+        error.value = result.error ?? 'long_press returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Tap an accessibility node by its node ID (e.g., "n3").
+   */
+  async function tapNode(nodeId: string): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('tap_node', { node_id: nodeId })
+      if (!result.success) {
+        error.value = result.error ?? 'tap_node returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Input text into a node (uses clipboard fallback on Android).
+   */
+  async function inputText(
+    text: string,
+    nodeId?: string,
+    clearFirst?: boolean,
+  ): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('input_text', {
+        text,
+        node_id: nodeId,
+        clear_first: clearFirst,
+      })
+      if (!result.success) {
+        error.value = result.error ?? 'input_text returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Scroll to find an element matching the given text.
+   */
+  async function scrollToFind(
+    text: string,
+    direction?: string,
+    maxScrolls?: number,
+  ): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('scroll_to_find', {
+        text,
+        direction,
+        max_scrolls: maxScrolls,
+      })
+      if (!result.success) {
+        error.value = result.error ?? 'scroll_to_find returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Find an element matching the given text and tap it.
+   */
+  async function findAndTap(
+    text: string,
+    direction?: string,
+    maxScrolls?: number,
+  ): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('find_and_tap', {
+        text,
+        direction,
+        max_scrolls: maxScrolls,
+      })
+      if (!result.success) {
+        error.value = result.error ?? 'find_and_tap returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  return {
+    screenTree,
+    isLoading,
+    error,
+    fetchScreenInfo,
+    checkPermissions,
+    findNodeInfo,
+    getDeviceInfo,
+    tap,
+    swipe,
+    longPress,
+    tapNode,
+    inputText,
+    scrollToFind,
+    findAndTap,
+  }
 }

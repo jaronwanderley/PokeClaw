@@ -88,6 +88,32 @@ Denies the download_model command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-find-and-tap`
+
+</td>
+<td>
+
+Enables the find_and_tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-find-and-tap`
+
+</td>
+<td>
+
+Denies the find_and_tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-find-node-info`
 
 </td>
@@ -192,6 +218,32 @@ Denies the get_session_status command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-input-text`
+
+</td>
+<td>
+
+Enables the input_text command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-input-text`
+
+</td>
+<td>
+
+Denies the input_text command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-list-models`
 
 </td>
@@ -218,6 +270,32 @@ Denies the list_models command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-long-press`
+
+</td>
+<td>
+
+Enables the long_press command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-long-press`
+
+</td>
+<td>
+
+Denies the long_press command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-ping`
 
 </td>
@@ -237,6 +315,32 @@ Enables the ping command without any pre-configured scope.
 <td>
 
 Denies the ping command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-scroll-to-find`
+
+</td>
+<td>
+
+Enables the scroll_to_find command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-scroll-to-find`
+
+</td>
+<td>
+
+Denies the scroll_to_find command without any pre-configured scope.
 
 </td>
 </tr>
@@ -315,6 +419,84 @@ Enables the stop_session command without any pre-configured scope.
 <td>
 
 Denies the stop_session command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-swipe`
+
+</td>
+<td>
+
+Enables the swipe command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-swipe`
+
+</td>
+<td>
+
+Denies the swipe command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-tap`
+
+</td>
+<td>
+
+Enables the tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-tap`
+
+</td>
+<td>
+
+Denies the tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-tap-node`
+
+</td>
+<td>
+
+Enables the tap_node command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-tap-node`
+
+</td>
+<td>
+
+Denies the tap_node command without any pre-configured scope.
 
 </td>
 </tr>

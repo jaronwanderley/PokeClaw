@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-find-and-tap"
+description = "Enables the find_and_tap command without any pre-configured scope."
+commands.allow = ["find_and_tap"]
+
+[[permission]]
+identifier = "deny-find-and-tap"
+description = "Denies the find_and_tap command without any pre-configured scope."
+commands.deny = ["find_and_tap"]

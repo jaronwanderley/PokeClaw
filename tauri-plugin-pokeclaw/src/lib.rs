@@ -743,6 +743,136 @@ mod desktop_commands {
             error: None,
         }
     }
+
+    // -----------------------------------------------------------------
+    // Gesture tool desktop mocks
+    // -----------------------------------------------------------------
+
+    /// Desktop mock for tap. Simulates tapping at the given coordinates.
+    #[tauri::command]
+    pub fn tap(x: i32, y: i32) -> ToolResult {
+        log::info!("tap (desktop mock): x={}, y={}", x, y);
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "message": format!("Tapped at ({}, {})", x, y) })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for swipe. Simulates a swipe gesture from start to end.
+    #[tauri::command]
+    pub fn swipe(start_x: i32, start_y: i32, end_x: i32, end_y: i32, duration_ms: Option<i32>) -> ToolResult {
+        let dur = duration_ms.unwrap_or(300);
+        log::info!(
+            "swipe (desktop mock): ({},{}) -> ({},{}) duration={}ms",
+            start_x, start_y, end_x, end_y, dur
+        );
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "message": format!("Swiped from ({},{}) to ({},{}) in {}ms", start_x, start_y, end_x, end_y, dur) })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for long_press. Simulates a long press at the given coordinates.
+    #[tauri::command]
+    pub fn long_press(x: i32, y: i32, duration_ms: Option<i32>) -> ToolResult {
+        let dur = duration_ms.unwrap_or(500);
+        log::info!("long_press (desktop mock): x={}, y={}, duration={}ms", x, y, dur);
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "message": format!("Long pressed at ({},{}) for {}ms", x, y, dur) })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for tap_node. Simulates tapping an accessibility node by ID.
+    /// Returns an error if node_id is empty.
+    #[tauri::command]
+    pub fn tap_node(node_id: String) -> ToolResult {
+        log::info!("tap_node (desktop mock): node_id='{}'", node_id);
+        if node_id.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("node_id must not be empty".into()),
+            };
+        }
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "message": format!("Tapped node {} at (540,160)", node_id) })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for input_text. Simulates entering text into a node.
+    #[tauri::command]
+    pub fn input_text(text: String, node_id: Option<String>, clear_first: Option<bool>) -> ToolResult {
+        log::info!(
+            "input_text (desktop mock): text='{}', node_id={:?}, clear_first={:?}",
+            text, node_id, clear_first
+        );
+        if text.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("text parameter must not be empty".into()),
+            };
+        }
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "message": format!("Input text: '{}' (clear_first={})", text, clear_first.unwrap_or(false)) })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for scroll_to_find. Simulates scrolling to find an element
+    /// matching the given text. Returns an error if text is empty.
+    #[tauri::command]
+    pub fn scroll_to_find(text: String, direction: Option<String>, max_scrolls: Option<i32>) -> ToolResult {
+        let dir = direction.unwrap_or_else(|| "down".into());
+        let max = max_scrolls.unwrap_or(5);
+        log::info!(
+            "scroll_to_find (desktop mock): text='{}', direction='{}', max_scrolls={}",
+            text, dir, max
+        );
+        if text.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("text parameter must not be empty".into()),
+            };
+        }
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "message": format!("Found element with text '{}' after scrolling {} (max_scrolls={})", text, dir, max) })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for find_and_tap. Simulates finding and tapping an element
+    /// matching the given text. Returns an error if text is empty.
+    #[tauri::command]
+    pub fn find_and_tap(text: String, direction: Option<String>, max_scrolls: Option<i32>) -> ToolResult {
+        let dir = direction.unwrap_or_else(|| "down".into());
+        let max = max_scrolls.unwrap_or(5);
+        log::info!(
+            "find_and_tap (desktop mock): text='{}', direction='{}', max_scrolls={}",
+            text, dir, max
+        );
+        if text.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("text parameter must not be empty".into()),
+            };
+        }
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "message": format!("Found '{}' and tapped at (270,280) (direction={}, max_scrolls={})", text, dir, max) })),
+            error: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -780,6 +910,13 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::find_node_info,
             desktop_commands::get_device_info,
             desktop_commands::check_permissions,
+            desktop_commands::tap,
+            desktop_commands::swipe,
+            desktop_commands::long_press,
+            desktop_commands::tap_node,
+            desktop_commands::input_text,
+            desktop_commands::scroll_to_find,
+            desktop_commands::find_and_tap,
         ]);
 
     builder.build()

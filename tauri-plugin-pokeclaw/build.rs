@@ -11,6 +11,13 @@ const COMMANDS: &[&str] = &[
     "find_node_info",
     "get_device_info",
     "check_permissions",
+    "tap",
+    "swipe",
+    "long_press",
+    "tap_node",
+    "input_text",
+    "scroll_to_find",
+    "find_and_tap",
 ];
 
 fn main() {

@@ -331,6 +331,18 @@
           "markdownDescription": "Denies the download_model command without any pre-configured scope."
         },
         {
+          "description": "Enables the find_and_tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-find-and-tap",
+          "markdownDescription": "Enables the find_and_tap command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the find_and_tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-find-and-tap",
+          "markdownDescription": "Denies the find_and_tap command without any pre-configured scope."
+        },
+        {
           "description": "Enables the find_node_info command without any pre-configured scope.",
           "type": "string",
           "const": "allow-find-node-info",
@@ -379,6 +391,18 @@
           "markdownDescription": "Denies the get_session_status command without any pre-configured scope."
         },
         {
+          "description": "Enables the input_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-input-text",
+          "markdownDescription": "Enables the input_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the input_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-input-text",
+          "markdownDescription": "Denies the input_text command without any pre-configured scope."
+        },
+        {
           "description": "Enables the list_models command without any pre-configured scope.",
           "type": "string",
           "const": "allow-list-models",
@@ -391,6 +415,18 @@
           "markdownDescription": "Denies the list_models command without any pre-configured scope."
         },
         {
+          "description": "Enables the long_press command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-long-press",
+          "markdownDescription": "Enables the long_press command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the long_press command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-long-press",
+          "markdownDescription": "Denies the long_press command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ping command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ping",
@@ -401,6 +437,18 @@
           "type": "string",
           "const": "deny-ping",
           "markdownDescription": "Denies the ping command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the scroll_to_find command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-scroll-to-find",
+          "markdownDescription": "Enables the scroll_to_find command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the scroll_to_find command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-scroll-to-find",
+          "markdownDescription": "Denies the scroll_to_find command without any pre-configured scope."
         },
         {
           "description": "Enables the send_message command without any pre-configured scope.",
@@ -437,6 +485,42 @@
           "type": "string",
           "const": "deny-stop-session",
           "markdownDescription": "Denies the stop_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the swipe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-swipe",
+          "markdownDescription": "Enables the swipe command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the swipe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-swipe",
+          "markdownDescription": "Denies the swipe command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tap",
+          "markdownDescription": "Enables the tap command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tap",
+          "markdownDescription": "Denies the tap command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tap_node command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tap-node",
+          "markdownDescription": "Enables the tap_node command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tap_node command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tap-node",
+          "markdownDescription": "Denies the tap_node command without any pre-configured scope."
         }
       ]
     }
