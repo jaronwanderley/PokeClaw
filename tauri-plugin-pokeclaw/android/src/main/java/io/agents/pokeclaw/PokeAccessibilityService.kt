@@ -4,13 +4,18 @@
 package io.agents.pokeclaw
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.content.Context
+import android.graphics.Path
 import android.graphics.Rect
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -188,6 +193,126 @@ class PokeAccessibilityService : AccessibilityService() {
                 }
             }
         }
+    }
+
+    // ======================== Gesture Dispatch ========================
+
+    /**
+     * Performs a tap gesture at the specified coordinates.
+     *
+     * @param x X coordinate in screen pixels.
+     * @param y Y coordinate in screen pixels.
+     * @param durationMs Touch duration in milliseconds (default 100).
+     * @return true if the gesture completed successfully, false otherwise.
+     */
+    fun performTap(x: Int, y: Int, durationMs: Long = 100): Boolean {
+        Log.d(TAG, "performTap: x=$x, y=$y, durationMs=$durationMs")
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val result = dispatchGestureSync(gesture)
+        Log.d(TAG, "performTap result: $result")
+        return result
+    }
+
+    /**
+     * Performs a swipe gesture from one point to another.
+     *
+     * @param startX Starting X coordinate.
+     * @param startY Starting Y coordinate.
+     * @param endX Ending X coordinate.
+     * @param endY Ending Y coordinate.
+     * @param durationMs Swipe duration in milliseconds.
+     * @return true if the gesture completed successfully, false otherwise.
+     */
+    fun performSwipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Long): Boolean {
+        Log.d(TAG, "performSwipe: ($startX,$startY) → ($endX,$endY), durationMs=$durationMs")
+        val path = Path().apply {
+            moveTo(startX.toFloat(), startY.toFloat())
+            lineTo(endX.toFloat(), endY.toFloat())
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val result = dispatchGestureSync(gesture)
+        Log.d(TAG, "performSwipe result: $result")
+        return result
+    }
+
+    /**
+     * Performs a long-press gesture at the specified coordinates.
+     *
+     * @param x X coordinate in screen pixels.
+     * @param y Y coordinate in screen pixels.
+     * @param durationMs Press duration in milliseconds (default 1000).
+     * @return true if the gesture completed successfully, false otherwise.
+     */
+    fun performLongPress(x: Int, y: Int, durationMs: Long): Boolean {
+        Log.d(TAG, "performLongPress: x=$x, y=$y, durationMs=$durationMs")
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val result = dispatchGestureSync(gesture)
+        Log.d(TAG, "performLongPress result: $result")
+        return result
+    }
+
+    /**
+     * Dispatches a gesture synchronously using CountDownLatch.
+     * Blocks the calling thread until the gesture completes, is cancelled, or times out (5 seconds).
+     *
+     * @param gesture The gesture description to dispatch.
+     * @return true if the gesture completed successfully, false on cancellation or timeout.
+     */
+    private fun dispatchGestureSync(gesture: GestureDescription): Boolean {
+        val succeeded = AtomicBoolean(false)
+        val latch = CountDownLatch(1)
+
+        val callback = object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                succeeded.set(true)
+                latch.countDown()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                Log.w(TAG, "dispatchGestureSync: gesture cancelled")
+                succeeded.set(false)
+                latch.countDown()
+            }
+        }
+
+        val dispatched = dispatchGesture(gesture, callback, null)
+        if (!dispatched) {
+            Log.e(TAG, "dispatchGestureSync: dispatchGesture returned false (system rejected)")
+            return false
+        }
+
+        return try {
+            val completed = latch.await(5, TimeUnit.SECONDS)
+            if (!completed) {
+                Log.e(TAG, "dispatchGestureSync: timed out after 5 seconds")
+                false
+            } else {
+                succeeded.get()
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            Log.e(TAG, "dispatchGestureSync: interrupted while waiting", e)
+            false
+        }
+    }
+
+    /**
+     * Returns the screen dimensions in pixels.
+     * Uses [android.util.DisplayMetrics] from resources — no external ScreenUtils dependency.
+     *
+     * @return IntArray of [widthPixels, heightPixels].
+     */
+    fun getScreenSize(): IntArray {
+        val metrics = resources.displayMetrics
+        val w = metrics.widthPixels
+        val h = metrics.heightPixels
+        Log.d(TAG, "getScreenSize: ${w}x${h}")
+        return intArrayOf(w, h)
     }
 
     // ======================== Internal: Tree Builder ========================
