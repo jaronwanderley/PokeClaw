@@ -10,6 +10,32 @@
 <tr>
 <td>
 
+`pokeclaw:allow-chat`
+
+</td>
+<td>
+
+Enables the chat command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-chat`
+
+</td>
+<td>
+
+Denies the chat command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-ping`
 
 </td>

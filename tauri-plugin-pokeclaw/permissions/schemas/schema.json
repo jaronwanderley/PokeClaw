@@ -295,6 +295,18 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the chat command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-chat",
+          "markdownDescription": "Enables the chat command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the chat command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-chat",
+          "markdownDescription": "Denies the chat command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ping command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ping",
