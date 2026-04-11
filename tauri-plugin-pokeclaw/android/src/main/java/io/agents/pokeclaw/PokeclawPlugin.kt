@@ -11,7 +11,10 @@ import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -805,15 +808,28 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         Log.i(TAG, "check_permissions: invoked")
 
         try {
+            val notificationEnabled = try {
+                // Check if the notification listener is enabled in system settings
+                val enabledListeners = Settings.Secure.getString(
+                    activity.contentResolver,
+                    "enabled_notification_listeners"
+                ) ?: ""
+                val componentName = "${activity.packageName}/${PokeNotificationListener::class.java.name}"
+                enabledListeners.contains(componentName)
+            } catch (e: Exception) {
+                Log.w(TAG, "check_permissions: failed to check notification listener settings", e)
+                false
+            }
+
+            val foregroundRunning = PokeForegroundService.isRunning()
+
             val data = JSObject()
             data.put("accessibility_enabled", PokeAccessibilityService.isEnabledInSettings(activity))
             data.put("accessibility_running", PokeAccessibilityService.isRunning())
-            // NotificationListener is S03 scope — placeholder false
-            data.put("notification_enabled", false)
-            // Foreground service is S03 scope — placeholder false
-            data.put("foreground_service", false)
+            data.put("notification_enabled", notificationEnabled)
+            data.put("foreground_service", foregroundRunning)
 
-            Log.i(TAG, "check_permissions: enabled=${data.getBoolean("accessibility_enabled")}, running=${data.getBoolean("accessibility_running")}")
+            Log.i(TAG, "check_permissions: accessibility_enabled=${data.getBoolean("accessibility_enabled")}, accessibility_running=${data.getBoolean("accessibility_running")}, notification_enabled=$notificationEnabled, foreground_service=$foregroundRunning")
             val result = JSObject()
             result.put("success", true)
             result.put("data", data)
@@ -826,6 +842,533 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
             result.put("success", false)
             result.put("data", null)
             result.put("error", "Failed to check permissions: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Navigation & Utility @Command methods — S03 new tools
+    // -----------------------------------------------------------------------
+
+    /**
+     * Well-known app name → package name mapping for convenience.
+     */
+    private val WELL_KNOWN_APPS = mapOf(
+        "whatsapp" to "com.whatsapp",
+        "telegram" to "org.telegram.messenger",
+        "instagram" to "com.instagram.android",
+        "facebook" to "com.facebook.katana",
+        "twitter" to "com.twitter.android",
+        "x" to "com.twitter.android",
+        "youtube" to "com.google.android.youtube",
+        "chrome" to "com.android.chrome",
+        "gmail" to "com.google.android.gm",
+        "google maps" to "com.google.android.apps.maps",
+        "maps" to "com.google.android.apps.maps",
+        "spotify" to "com.spotify.music",
+        "tiktok" to "com.zhiliaoapp.musically",
+        "snapchat" to "com.snapchat.android",
+        "signal" to "org.thoughtcrime.securesms",
+        "discord" to "com.discord",
+        "slack" to "com.Slack",
+        "line" to "jp.naver.line.android",
+        "weChat" to "com.tencent.mm",
+        "phone" to "com.google.android.dialer",
+        "dialer" to "com.google.android.dialer",
+        "settings" to "com.android.settings",
+        "camera" to "com.android.camera",
+        "photos" to "com.google.android.apps.photos",
+        "files" to "com.google.android.apps.nbu.files",
+        "messages" to "com.google.android.apps.messaging",
+        "sms" to "com.google.android.apps.messaging",
+    )
+
+    /**
+     * Dispatch a system key action (back, home, recent_apps, etc.) via the accessibility service.
+     *
+     * Args: action (String, required) — back, home, recent_apps, notifications, collapse_notifications, lock_screen, unlock_screen
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun system_key(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val action = args.getString("action")
+            ?.lowercase()?.trim()
+            ?: return invoke.reject("action is required")
+
+        Log.i(TAG, "system_key: action='$action'")
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "system_key: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val success: Boolean
+            val label: String
+            when (action) {
+                "back" -> { success = service.pressBack(); label = "Back" }
+                "home" -> { success = service.pressHome(); label = "Home" }
+                "recent_apps" -> { success = service.openRecentApps(); label = "Recent apps" }
+                "notifications" -> { success = service.expandNotifications(); label = "Expand notifications" }
+                "collapse_notifications" -> { success = service.collapseNotifications(); label = "Collapse notifications" }
+                "lock_screen" -> { success = service.lockScreen(); label = "Lock screen" }
+                "unlock_screen" -> { success = service.unlockScreen(); label = "Unlock screen" }
+                else -> {
+                    Log.w(TAG, "system_key: unknown action '$action'")
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", null)
+                    result.put("error", "Unknown action: '$action'. Supported: back, home, recent_apps, notifications, collapse_notifications, lock_screen, unlock_screen")
+                    invoke.resolve(result)
+                    return
+                }
+            }
+
+            Log.i(TAG, "system_key: $action result=$success")
+            val result = JSObject()
+            result.put("success", success)
+            result.put("data", if (success) "$label pressed" else null)
+            result.put("error", if (success) null else "System key action '$action' failed — service may have rejected the global action")
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "system_key: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "system_key failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Open an app by name or package name.
+     *
+     * Resolves common app names (whatsapp, telegram, etc.) to package names.
+     * Falls back to treating the input as a raw package name.
+     * After launching, attempts to dismiss any chain-launch dialog by pressing Back after a short delay.
+     *
+     * Args: app_name (String, required)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun open_app(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val appName = args.getString("app_name")
+            ?.trim()
+            ?: return invoke.reject("app_name is required")
+
+        Log.i(TAG, "open_app: app_name='$appName'")
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "open_app: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            // Resolve app name to package name
+            val packageName = WELL_KNOWN_APPS[appName.lowercase()] ?: run {
+                // Check if it's already a package name (contains a dot)
+                if (appName.contains(".")) {
+                    appName
+                } else {
+                    // Try to find a matching installed app by label
+                    resolveAppNameToPackage(appName)
+                }
+            }
+
+            if (packageName == null) {
+                Log.w(TAG, "open_app: could not resolve app '$appName' to a package name")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Could not resolve app '$appName'. Use a well-known name or provide the package name (e.g. com.whatsapp).")
+                invoke.resolve(result)
+                return
+            }
+
+            Log.i(TAG, "open_app: resolved '$appName' → package='$packageName'")
+            val launchSuccess = service.openApp(packageName)
+
+            if (launchSuccess) {
+                // Dismiss chain-launch dialog after a short delay
+                kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+                    Thread.sleep(1500)
+                    try {
+                        service.pressBack()
+                        Log.d(TAG, "open_app: dismissed chain-launch dialog for $packageName")
+                    } catch (e: Exception) {
+                        Log.d(TAG, "open_app: no chain-launch dialog to dismiss for $packageName")
+                    }
+                }
+            }
+
+            Log.i(TAG, "open_app: result=$launchSuccess for '$appName' ($packageName)")
+            val result = JSObject()
+            result.put("success", launchSuccess)
+            result.put("data", if (launchSuccess) "Opened $appName ($packageName)" else null)
+            result.put("error", if (launchSuccess) null else "Failed to open $appName ($packageName). The app may not be installed.")
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "open_app: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "open_app failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Get active notifications from PokeNotificationListener.
+     *
+     * No args required.
+     * Returns: { success: Boolean, data: [notification objects], error: String? }
+     * Each notification: { package_name, key, post_time, ticker_text, is_ongoing, is_clearable }
+     */
+    @Command
+    fun get_notifications(invoke: Invoke) {
+        Log.i(TAG, "get_notifications: invoked")
+
+        try {
+            val listener = PokeNotificationListener.getInstance()
+            if (listener == null) {
+                Log.w(TAG, "get_notifications: notification listener not connected")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Notification listener not running. Enable it in Settings > Apps > Special access > Notification access.")
+                invoke.resolve(result)
+                return
+            }
+
+            val notifications = listener.getActiveNotificationsList()
+            val dataArray = app.tauri.plugin.JSArray()
+
+            for (notif in notifications) {
+                val obj = JSObject()
+                obj.put("package_name", notif["package_name"] ?: "")
+                obj.put("key", notif["key"] ?: "")
+                obj.put("post_time", notif["post_time"] ?: 0L)
+                obj.put("ticker_text", notif["ticker_text"] ?: "")
+                obj.put("is_ongoing", notif["is_ongoing"] ?: false)
+                obj.put("is_clearable", notif["is_clearable"] ?: false)
+                dataArray.put(obj)
+            }
+
+            Log.i(TAG, "get_notifications: returned ${notifications.size} notifications")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", dataArray)
+            result.put("error", null as String?)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "get_notifications: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "get_notifications failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Get or set the system clipboard content.
+     *
+     * Args: action (String, required — "get" or "set"), text (String, required for "set")
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun clipboard(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val action = args.getString("action")
+            ?.lowercase()?.trim()
+            ?: return invoke.reject("action is required (get or set)")
+
+        Log.i(TAG, "clipboard: action='$action'")
+
+        try {
+            val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            if (clipboard == null) {
+                Log.e(TAG, "clipboard: ClipboardManager not available")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "ClipboardManager not available")
+                invoke.resolve(result)
+                return
+            }
+
+            when (action) {
+                "get" -> {
+                    val clip = clipboard.primaryClip
+                    val text = if (clip != null && clip.itemCount > 0) {
+                        clip.getItemAt(0)?.text?.toString() ?: ""
+                    } else {
+                        ""
+                    }
+                    Log.i(TAG, "clipboard: get returned ${text.length} chars")
+                    val result = JSObject()
+                    result.put("success", true)
+                    result.put("data", text)
+                    result.put("error", null as String?)
+                    invoke.resolve(result)
+                }
+                "set" -> {
+                    val text = args.getString("text")
+                        ?: return invoke.reject("text is required for set action")
+
+                    val latch = java.util.concurrent.CountDownLatch(1)
+                    val success = java.util.concurrent.atomic.AtomicBoolean(false)
+
+                    Handler(Looper.getMainLooper()).post {
+                        try {
+                            val clip = ClipData.newPlainText("text", text)
+                            clipboard.setPrimaryClip(clip)
+                            success.set(true)
+                            Log.d(TAG, "clipboard: set ${text.length} chars")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "clipboard: set failed — ${e.message}", e)
+                        } finally {
+                            latch.countDown()
+                        }
+                    }
+
+                    val completed = latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                    if (completed && success.get()) {
+                        Log.i(TAG, "clipboard: set ${text.length} chars successfully")
+                        val result = JSObject()
+                        result.put("success", true)
+                        result.put("data", "Clipboard set to '${text.take(50)}${if (text.length > 50) "..." else ""}'")
+                        result.put("error", null as String?)
+                        invoke.resolve(result)
+                    } else {
+                        Log.e(TAG, "clipboard: set failed or timed out")
+                        val result = JSObject()
+                        result.put("success", false)
+                        result.put("data", null)
+                        result.put("error", "Failed to set clipboard${if (!completed) " (timed out)" else ""}")
+                        invoke.resolve(result)
+                    }
+                }
+                else -> {
+                    Log.w(TAG, "clipboard: unknown action '$action'")
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", null)
+                    result.put("error", "Unknown action: '$action'. Use 'get' or 'set'.")
+                    invoke.resolve(result)
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "clipboard: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "clipboard failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Get the list of installed applications on the device.
+     *
+     * Args: filter (String, optional — filter by app name, case-insensitive)
+     * Returns: { success: Boolean, data: [{ package_name, app_name, is_system }], error: String? }
+     */
+    @Command
+    fun get_installed_apps(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val filter = args.optString("filter", null)?.lowercase()?.trim()
+
+        Log.i(TAG, "get_installed_apps: filter='$filter'")
+
+        try {
+            val pm = activity.packageManager
+            val apps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstalledApplications(0)
+            }
+
+            val dataArray = app.tauri.plugin.JSArray()
+            var count = 0
+
+            for (appInfo in apps) {
+                val label = try {
+                    appInfo.loadLabel(pm)?.toString() ?: ""
+                } catch (e: Exception) {
+                    ""
+                }
+
+                // Apply filter if provided
+                if (filter != null) {
+                    val matchesLabel = label.lowercase().contains(filter)
+                    val matchesPackage = appInfo.packageName.lowercase().contains(filter)
+                    if (!matchesLabel && !matchesPackage) continue
+                }
+
+                val obj = JSObject()
+                obj.put("package_name", appInfo.packageName)
+                obj.put("app_name", label)
+                obj.put("is_system", (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0)
+                dataArray.put(obj)
+                count++
+            }
+
+            Log.i(TAG, "get_installed_apps: returned $count apps${if (filter != null) " matching '$filter'" else ""}")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", dataArray)
+            result.put("error", null as String?)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "get_installed_apps: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "get_installed_apps failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Initiate a phone call using ACTION_DIAL with optional contact resolution.
+     *
+     * Args: contact (String, required — phone number or contact name)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun make_call(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val contact = args.getString("contact")
+            ?.trim()
+            ?: return invoke.reject("contact is required (phone number or contact name)")
+
+        Log.i(TAG, "make_call: contact='$contact'")
+
+        try {
+            // If it looks like a phone number (contains digits, possibly with +, -, spaces, parens), dial directly
+            val cleanContact = contact.replace("[+\\-()\\s]".toRegex(), "")
+            val isPhoneNumber = cleanContact.isNotEmpty() && cleanContact.all { it.isDigit() }
+
+            val phoneNumber = if (isPhoneNumber) {
+                contact
+            } else {
+                // Try to resolve contact name using ContactsContract
+                resolveContactToPhone(contact)
+            }
+
+            if (phoneNumber == null) {
+                Log.w(TAG, "make_call: could not resolve '$contact' to a phone number")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Could not resolve '$contact' to a phone number. Provide a phone number directly.")
+                invoke.resolve(result)
+                return
+            }
+
+            Log.i(TAG, "make_call: resolved '$contact' → dialing '$phoneNumber'")
+            val dialIntent = Intent(Intent.ACTION_DIAL).apply {
+                data = Uri.parse("tel:$phoneNumber")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(dialIntent)
+
+            Log.i(TAG, "make_call: dial screen opened for '$phoneNumber'")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", "Dial screen opened for $phoneNumber")
+            result.put("error", null as String?)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "make_call: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "make_call failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Take a screenshot of the current screen and return the file path.
+     *
+     * Uses the accessibility service's takeScreenshot API (API 30+).
+     * Returns: { success: Boolean, data: String (file path), error: String? }
+     */
+    @Command
+    fun take_screenshot(invoke: Invoke) {
+        Log.i(TAG, "take_screenshot: invoked")
+
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                Log.w(TAG, "take_screenshot: not supported below API 30 (current: ${Build.VERSION.SDK_INT})")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Screenshot requires Android 11 (API 30) or higher. Current: API ${Build.VERSION.SDK_INT}")
+                invoke.resolve(result)
+                return
+            }
+
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "take_screenshot: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val args = invoke.getArgs()
+            val customPath = args.optString("file_path", null)
+
+            val filePath = service.takeScreenshot(customPath)
+            if (filePath != null) {
+                Log.i(TAG, "take_screenshot: saved to $filePath")
+                val result = JSObject()
+                result.put("success", true)
+                result.put("data", filePath)
+                result.put("error", null as String?)
+                invoke.resolve(result)
+            } else {
+                Log.w(TAG, "take_screenshot: service returned null path")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Screenshot capture failed — the service may not have capture permission or the screen may be secured")
+                invoke.resolve(result)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "take_screenshot: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "take_screenshot failed: ${e.message}")
             invoke.resolve(result)
         }
     }
@@ -1660,6 +2203,96 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         result.put("data", null as String?)
         result.put("error", error)
         return result
+    }
+
+    // -----------------------------------------------------------------------
+    // App/Contact resolution helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Try to resolve an app name to a package name using PackageManager query.
+     * Checks the app label for a case-insensitive match.
+     *
+     * @return Package name if found, null otherwise.
+     */
+    private fun resolveAppNameToPackage(appName: String): String? {
+        return try {
+            val pm = activity.packageManager
+            val intent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(intent, 0)
+            }
+
+            val lowerName = appName.lowercase()
+            for (ri in resolveInfos) {
+                val label = ri.loadLabel(pm)?.toString()?.lowercase() ?: ""
+                if (label.contains(lowerName)) {
+                    val packageName = ri.activityInfo.packageName
+                    Log.d(TAG, "resolveAppNameToPackage: '$appName' → $packageName (matched label '$label')")
+                    return packageName
+                }
+            }
+
+            // Fallback: check if appName is part of any package name
+            for (ri in resolveInfos) {
+                if (ri.activityInfo.packageName.lowercase().contains(lowerName)) {
+                    Log.d(TAG, "resolveAppNameToPackage: '$appName' → ${ri.activityInfo.packageName} (matched package)")
+                    return ri.activityInfo.packageName
+                }
+            }
+
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "resolveAppNameToPackage: failed — ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Try to resolve a contact name to a phone number using ContactsContract.
+     *
+     * @return Phone number string if found, null otherwise.
+     */
+    private fun resolveContactToPhone(contactName: String): String? {
+        return try {
+            val cursor = activity.contentResolver.query(
+                android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME
+                ),
+                "${android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
+                arrayOf("%$contactName%"),
+                null
+            )
+
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val number = it.getString(
+                        it.getColumnIndexOrThrow(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+                    )
+                    val name = it.getString(
+                        it.getColumnIndexOrThrow(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                    )
+                    Log.d(TAG, "resolveContactToPhone: '$contactName' → $number ($name)")
+                    number
+                } else {
+                    Log.d(TAG, "resolveContactToPhone: no match for '$contactName'")
+                    null
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "resolveContactToPhone: permission denied — ${e.message}")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "resolveContactToPhone: failed — ${e.message}")
+            null
+        }
     }
 
     // -----------------------------------------------------------------------
