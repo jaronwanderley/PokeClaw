@@ -7,6 +7,7 @@ import ChatMessage from './components/ChatMessage.vue'
 import MessageInput from './components/MessageInput.vue'
 import ModelPicker from './components/ModelPicker.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import PermissionPanel from './components/PermissionPanel.vue'
 
 const { messages, streamingText, isStreaming, sessionStatus, sendMessage, setSessionStatus } = useChat()
 const { preferGpu } = useModel()
@@ -14,6 +15,7 @@ const { screenTree, isLoading: isScreenLoading, error: screenError, fetchScreenI
 const chatRef = ref<HTMLElement | null>(null)
 const showSettings = ref(false)
 const showDebug = ref(false)
+const showPermissions = ref(false)
 
 function scrollToBottom() {
   nextTick(() => {
@@ -99,9 +101,14 @@ function handleSettingsClose() {
 
     <!-- Debug: Accessibility Screen Info -->
     <div v-if="sessionStatus === 'ready'" class="debug-section">
-      <button class="debug-toggle" @click="showDebug = !showDebug">
-        {{ showDebug ? '▾ Screen Info' : '▸ Screen Info' }}
-      </button>
+      <div class="debug-toggles">
+        <button class="debug-toggle" @click="showDebug = !showDebug">
+          {{ showDebug ? '▾ Screen Info' : '▸ Screen Info' }}
+        </button>
+        <button class="debug-toggle" @click="showPermissions = !showPermissions">
+          {{ showPermissions ? '▾ Permissions' : '▸ Permissions' }}
+        </button>
+      </div>
       <div v-if="showDebug" class="debug-content">
         <button class="debug-fetch-btn" :disabled="isScreenLoading" @click="fetchScreenInfo">
           {{ isScreenLoading ? 'Loading...' : 'Fetch Screen Tree' }}
@@ -113,6 +120,9 @@ function handleSettingsClose() {
 
     <!-- Settings panel -->
     <SettingsPanel :visible="showSettings" @close="handleSettingsClose" @backend-changed="() => {}" />
+
+    <!-- Permission panel -->
+    <PermissionPanel :visible="showPermissions" @close="showPermissions = false" />
   </div>
 </template>
 
@@ -333,6 +343,11 @@ function handleSettingsClose() {
   border-top: 1px solid var(--div);
   background: var(--surface);
   padding: 8px 16px;
+}
+
+.debug-toggles {
+  display: flex;
+  gap: 16px;
 }
 
 .debug-toggle {

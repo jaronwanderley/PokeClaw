@@ -403,6 +403,24 @@ export function useAccessibility() {
   }
 
   /**
+   * Open a system permission settings page.
+   * @param target Which settings page: "accessibility", "notification", or "foreground_service"
+   */
+  async function openPermissionSettings(target: string): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('open_permission_settings', { target })
+      if (!result.success) {
+        error.value = result.error ?? 'open_permission_settings returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
    * Open the dialer with a phone number or contact name.
    */
   async function makeCall(target: string): Promise<ToolResult> {
@@ -442,5 +460,6 @@ export function useAccessibility() {
     clipboard,
     getInstalledApps,
     makeCall,
+    openPermissionSettings,
   }
 }
