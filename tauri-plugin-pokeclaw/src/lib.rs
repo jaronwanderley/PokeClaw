@@ -5,6 +5,30 @@ use tauri::{
 };
 
 // ---------------------------------------------------------------------------
+// Observation tool shared types (desktop + Android contract)
+// ---------------------------------------------------------------------------
+
+/// Structured response matching the Android @Command contract:
+/// `{ success: bool, data: Any?, error: String? }`
+#[derive(Clone, serde::Serialize)]
+pub struct ToolResult {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Permission/status structure returned by check_permissions.
+#[derive(Clone, serde::Serialize)]
+pub struct PermissionStatus {
+    pub accessibility_enabled: bool,
+    pub accessibility_running: bool,
+    pub notification_enabled: bool,
+    pub foreground_service: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Session status enum
 // ---------------------------------------------------------------------------
 
@@ -148,6 +172,23 @@ fn rand_simple_sixteen() -> u16 {
     x ^= x << 25;
     x ^= x >> 27;
     (x as u16) & 0xFFFF
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+/// Used by desktop mock get_device_info for time category.
+fn date_from_days(days_since_epoch: u64) -> (u32, u32, u32) {
+    // Algorithm from Howard Hinnant: http://howardhinnant.github.io/date_algorithms.html
+    let z = days_since_epoch as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    let y = (y + if m <= 2 { 1 } else { 0 }) as u32;
+    (y, m, d)
 }
 
 // ---------------------------------------------------------------------------
@@ -574,6 +615,134 @@ mod desktop_commands {
 
         Ok(())
     }
+
+    // -----------------------------------------------------------------
+    // Observation tool desktop mocks
+    // -----------------------------------------------------------------
+
+    /// Desktop mock for get_screen_info.
+    /// Returns a realistic sample screen tree matching the format
+    /// produced by PokeAccessibilityService.getScreenTree().
+    #[tauri::command]
+    pub fn get_screen_info() -> ToolResult {
+        log::info!("get_screen_info (desktop mock): returning sample screen tree");
+        let tree = "[n1] \"Messages\" tap (540,80)\n\
+                     [n2] \"Search\" tap edit (540,160)\n\
+                     [n3] \"John\" tap (270,280)\n\
+                     [n4] \"Hey, are you free?\" (270,330)\n\
+                     [n5] \"Alice\" tap (270,430)\n\
+                     [n6] \"Meeting at 3pm\" (270,480)\n\
+                     [n7] \"Send message\" tap (990,2100)";
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "tree": tree })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for find_node_info.
+    /// Returns a single mock node matching the searched text.
+    /// Returns an error response if the text parameter is empty.
+    #[tauri::command]
+    pub fn find_node_info(text: String) -> ToolResult {
+        log::info!("find_node_info (desktop mock): text='{}'", text);
+        if text.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("text parameter must not be empty".into()),
+            };
+        }
+        let node = serde_json::json!({
+            "index": 0,
+            "className": "android.widget.TextView",
+            "text": text,
+            "bounds": "[100,200][400,260]",
+            "clickable": true,
+        });
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "nodes": [node] })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for get_device_info.
+    /// Returns category-specific mock info strings matching the format
+    /// produced by the Android GetDeviceInfoTool categories.
+    /// Returns an error for unknown categories.
+    #[tauri::command]
+    pub fn get_device_info(category: String) -> ToolResult {
+        log::info!("get_device_info (desktop mock): category='{}'", category);
+        let info = match category.to_lowercase().as_str() {
+            "battery" => "Battery: 85%, charging",
+            "wifi" => "WiFi: connected to 'HomeWifi', 2.4GHz, signal -45dBm, 65Mbps",
+            "storage" => "Storage: 45.2 GB used of 128.0 GB (35%), 82.8 GB free",
+            "bluetooth" => "Bluetooth: enabled, paired devices: [Galaxy Buds, Car Audio]",
+            "screen" => "Brightness: 60%, Dark mode: OFF",
+            "device" => "Android 14 (API 34), Model: Google Pixel 8",
+            "time" => {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let secs = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                // Simple UTC time formatting without chrono
+                let days_since_epoch = secs / 86400;
+                let time_of_day = secs % 86400;
+                let hours = (time_of_day / 3600) as u32;
+                let minutes = ((time_of_day % 3600) / 60) as u32;
+                let seconds = (time_of_day % 60) as u32;
+                // Approximate year/month/day (good enough for mock data)
+                let (year, month, day) = date_from_days(days_since_epoch);
+                let time_str = format!(
+                    "Time: {:04}-{:02}-{:02} {:02}:{:02}:{:02} (mock UTC)",
+                    year, month, day, hours, minutes, seconds
+                );
+                return ToolResult {
+                    success: true,
+                    data: Some(serde_json::json!({ "info": time_str })),
+                    error: None,
+                };
+            }
+            _ => {
+                return ToolResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!(
+                        "Unknown category '{}'. Supported: battery, wifi, storage, bluetooth, screen, device, time",
+                        category
+                    )),
+                };
+            }
+        };
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "info": info })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for check_permissions.
+    /// Returns a PermissionStatus with accessibility enabled/running true,
+    /// and notification/foreground_service false (simulating a typical
+    /// development environment where accessibility is on but notifications
+    /// and foreground service are not yet granted).
+    #[tauri::command]
+    pub fn check_permissions() -> ToolResult {
+        log::info!("check_permissions (desktop mock): returning mock permission status");
+        let status = PermissionStatus {
+            accessibility_enabled: true,
+            accessibility_running: true,
+            notification_enabled: false,
+            foreground_service: false,
+        };
+        ToolResult {
+            success: true,
+            data: Some(serde_json::to_value(&status).unwrap_or_else(|_| serde_json::json!({}))),
+            error: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +776,10 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::chat,
             desktop_commands::list_models,
             desktop_commands::download_model,
+            desktop_commands::get_screen_info,
+            desktop_commands::find_node_info,
+            desktop_commands::get_device_info,
+            desktop_commands::check_permissions,
         ]);
 
     builder.build()

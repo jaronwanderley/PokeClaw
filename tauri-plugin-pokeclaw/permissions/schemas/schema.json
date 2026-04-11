@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the chat command without any pre-configured scope."
         },
         {
+          "description": "Enables the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-permissions",
+          "markdownDescription": "Enables the check_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-permissions",
+          "markdownDescription": "Denies the check_permissions command without any pre-configured scope."
+        },
+        {
           "description": "Enables the download_model command without any pre-configured scope.",
           "type": "string",
           "const": "allow-download-model",
@@ -317,6 +329,42 @@
           "type": "string",
           "const": "deny-download-model",
           "markdownDescription": "Denies the download_model command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the find_node_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-find-node-info",
+          "markdownDescription": "Enables the find_node_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the find_node_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-find-node-info",
+          "markdownDescription": "Denies the find_node_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_device_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-device-info",
+          "markdownDescription": "Enables the get_device_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_device_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-device-info",
+          "markdownDescription": "Denies the get_device_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_screen_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-screen-info",
+          "markdownDescription": "Enables the get_screen_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_screen_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-screen-info",
+          "markdownDescription": "Denies the get_screen_info command without any pre-configured scope."
         },
         {
           "description": "Enables the get_session_status command without any pre-configured scope.",

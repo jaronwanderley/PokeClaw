@@ -36,6 +36,32 @@ Denies the chat command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-check-permissions`
+
+</td>
+<td>
+
+Enables the check_permissions command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-check-permissions`
+
+</td>
+<td>
+
+Denies the check_permissions command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-download-model`
 
 </td>
@@ -55,6 +81,84 @@ Enables the download_model command without any pre-configured scope.
 <td>
 
 Denies the download_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-find-node-info`
+
+</td>
+<td>
+
+Enables the find_node_info command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-find-node-info`
+
+</td>
+<td>
+
+Denies the find_node_info command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-get-device-info`
+
+</td>
+<td>
+
+Enables the get_device_info command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-get-device-info`
+
+</td>
+<td>
+
+Denies the get_device_info command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-get-screen-info`
+
+</td>
+<td>
+
+Enables the get_screen_info command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-get-screen-info`
+
+</td>
+<td>
+
+Denies the get_screen_info command without any pre-configured scope.
 
 </td>
 </tr>
