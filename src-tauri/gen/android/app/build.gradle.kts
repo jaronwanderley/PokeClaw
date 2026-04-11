@@ -37,7 +37,7 @@ android {
             }
         }
         getByName("release") {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
@@ -46,10 +46,22 @@ android {
         }
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         buildConfig = true
+    }
+    packaging {
+        resources.excludes.add("META-INF/DEPENDENCIES")
+        resources.excludes.add("META-INF/NOTICE")
+        resources.excludes.add("META-INF/LICENSE")
+        resources.excludes.add("META-INF/LICENSE.txt")
+        resources.excludes.add("META-INF/NOTICE.txt")
+        resources.excludes.add("META-INF/INDEX.LIST")
     }
 }
 
