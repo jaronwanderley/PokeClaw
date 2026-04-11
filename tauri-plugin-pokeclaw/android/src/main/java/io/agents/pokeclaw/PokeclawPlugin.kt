@@ -1,7 +1,20 @@
 package io.agents.pokeclaw
 
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiInfo
+import android.net.wifi.WifiManager
+import android.os.BatteryManager
+import android.os.Environment
+import android.os.StatFs
+import android.provider.Settings
 import android.util.Log
+import android.view.accessibility.AccessibilityNodeInfo
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -600,6 +613,341 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         }
 
         invoke.resolve(result)
+    }
+
+    // -----------------------------------------------------------------------
+    // Observation @Command methods — bridge accessibility service to IPC
+    // -----------------------------------------------------------------------
+
+    /**
+     * Return the current screen accessibility tree as a structured string.
+     *
+     * No args required.
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun get_screen_info(invoke: Invoke) {
+        Log.i(TAG, "get_screen_info: invoked")
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "get_screen_info: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val tree = service.getScreenTree()
+            if (tree == null) {
+                Log.w(TAG, "get_screen_info: screen tree is null (no active window)")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "System dialog is blocking screen read")
+                invoke.resolve(result)
+                return
+            }
+
+            Log.i(TAG, "get_screen_info: tree returned (${tree.length} chars)")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", tree)
+            result.put("error", null)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "get_screen_info: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Failed to read screen: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Find accessibility nodes matching the given text.
+     *
+     * Args: text (String, required)
+     * Returns: { success: Boolean, data: [node details], error: String? }
+     * Each node: { index, className, text, contentDescription, clickable, enabled, visible, bounds }
+     */
+    @Command
+    fun find_node_info(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val text = args.getString("text")
+            ?: return invoke.reject("text is required")
+
+        Log.i(TAG, "find_node_info: text='$text'")
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "find_node_info: accessibility service not connected")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val nodes = service.findNodesByText(text)
+            val nodesArray = app.tauri.plugin.JSArray()
+
+            for ((index, node) in nodes.withIndex()) {
+                try {
+                    val nodeObj = JSObject()
+                    nodeObj.put("index", index)
+                    nodeObj.put("className", node.className?.toString() ?: "")
+                    nodeObj.put("text", node.text?.toString() ?: "")
+                    nodeObj.put("contentDescription", node.contentDescription?.toString() ?: "")
+                    nodeObj.put("clickable", node.isClickable)
+                    nodeObj.put("enabled", node.isEnabled)
+                    nodeObj.put("visible", node.isVisibleToUser)
+
+                    val bounds = android.graphics.Rect()
+                    node.getBoundsInScreen(bounds)
+                    nodeObj.put("bounds", bounds.toShortString())
+
+                    nodesArray.put(nodeObj)
+                } catch (e: Exception) {
+                    Log.w(TAG, "find_node_info: error reading node $index: ${e.message}")
+                }
+            }
+
+            PokeAccessibilityService.recycleNodes(nodes)
+
+            Log.i(TAG, "find_node_info: found ${nodes.size} nodes for '$text'")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", nodesArray)
+            result.put("error", null)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "find_node_info: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Failed to find nodes: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Get device system info for a given category.
+     *
+     * Args: category (String, required) — battery, wifi, storage, bluetooth, screen, device, time
+     * Returns: { success: Boolean, data: String, error: String? }
+     */
+    @Command
+    fun get_device_info(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val category = args.getString("category")
+            ?: return invoke.reject("category is required")
+
+        Log.i(TAG, "get_device_info: category='$category'")
+
+        try {
+            val info: String = when (category.lowercase().trim()) {
+                "battery" -> getBatteryInfo()
+                "wifi" -> getWifiInfo()
+                "storage" -> getStorageInfo()
+                "bluetooth" -> getBluetoothInfo()
+                "screen" -> getScreenDeviceInfo()
+                "device" -> getDeviceDetails()
+                "time" -> getCurrentTime()
+                else -> {
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", "")
+                    result.put("error", "Unknown category: $category. Use: battery, wifi, storage, bluetooth, screen, device, time")
+                    invoke.resolve(result)
+                    return
+                }
+            }
+
+            Log.i(TAG, "get_device_info: $category -> ${info.take(80)}")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", info)
+            result.put("error", null)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "get_device_info: error for $category — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", "")
+            result.put("error", "Failed to get $category info: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Check permission and service status for accessibility, notifications, foreground.
+     *
+     * No args required.
+     * Returns: { success: Boolean, data: { accessibility_enabled, accessibility_running, notification_enabled, foreground_service }, error: String? }
+     */
+    @Command
+    fun check_permissions(invoke: Invoke) {
+        Log.i(TAG, "check_permissions: invoked")
+
+        try {
+            val data = JSObject()
+            data.put("accessibility_enabled", PokeAccessibilityService.isEnabledInSettings(activity))
+            data.put("accessibility_running", PokeAccessibilityService.isRunning())
+            // NotificationListener is S03 scope — placeholder false
+            data.put("notification_enabled", false)
+            // Foreground service is S03 scope — placeholder false
+            data.put("foreground_service", false)
+
+            Log.i(TAG, "check_permissions: enabled=${data.getBoolean("accessibility_enabled")}, running=${data.getBoolean("accessibility_running")}")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", data)
+            result.put("error", null)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "check_permissions: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Failed to check permissions: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Device info helpers (ported from legacy GetDeviceInfoTool)
+    // -----------------------------------------------------------------------
+
+    private fun getBatteryInfo(): String {
+        val bm = activity.getSystemService(android.content.Context.BATTERY_SERVICE) as? BatteryManager
+            ?: return "Battery: unable to query"
+        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val status = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+
+        val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        val batteryIntent = activity.registerReceiver(null, filter)
+        val tempRaw = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+        val tempC = tempRaw / 10.0f
+
+        val sb = StringBuilder()
+        sb.append("Battery: ").append(level).append("%")
+        sb.append(if (charging) ", charging" else ", not charging")
+        if (tempC > 0) sb.append(String.format(", %.1f°C", tempC))
+        return sb.toString()
+    }
+
+    private fun getWifiInfo(): String {
+        val wm = activity.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as? WifiManager
+            ?: return "WiFi: unable to query"
+        if (!wm.isWifiEnabled) return "WiFi: disabled"
+
+        val cm = activity.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val info = wm.connectionInfo
+        if (info == null || info.networkId == -1) return "WiFi: enabled but not connected"
+
+        val ssid = info.ssid?.replace("\"", "") ?: "unknown"
+        val rssi = info.rssi
+        val freq = info.frequency
+        val speed = info.linkSpeed
+        val band = if (freq > 4900) "5GHz" else "2.4GHz"
+
+        return "WiFi: connected to '$ssid', $band, signal ${rssi}dBm, ${speed}Mbps"
+    }
+
+    private fun getStorageInfo(): String {
+        val stat = StatFs(Environment.getDataDirectory().absolutePath)
+        val totalBytes = stat.totalBytes
+        val freeBytes = stat.availableBytes
+        val usedBytes = totalBytes - freeBytes
+        val pct = (usedBytes * 100 / totalBytes).toInt()
+        return "Storage: ${formatBytes(usedBytes)} used of ${formatBytes(totalBytes)} ($pct%), ${formatBytes(freeBytes)} free"
+    }
+
+    private fun getBluetoothInfo(): String {
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+            ?: return "Bluetooth: not available on this device"
+        if (!adapter.isEnabled) return "Bluetooth: disabled"
+
+        val sb = StringBuilder("Bluetooth: enabled")
+        try {
+            val bonded = adapter.bondedDevices
+            if (!bonded.isNullOrEmpty()) {
+                sb.append(", paired devices: ")
+                val names = bonded.take(5).map {
+                    it.name ?: it.address
+                }
+                sb.append(names.joinToString(", "))
+                if (bonded.size > 5) sb.append("...")
+            }
+        } catch (e: SecurityException) {
+            sb.append(" (cannot list devices — permission denied)")
+        }
+        return sb.toString()
+    }
+
+    private fun getScreenDeviceInfo(): String {
+        val sb = StringBuilder()
+        try {
+            val brightness = Settings.System.getInt(activity.contentResolver, Settings.System.SCREEN_BRIGHTNESS)
+            val pct = brightness * 100 / 255
+            sb.append("Brightness: ").append(pct).append("%")
+        } catch (e: Settings.SettingNotFoundException) {
+            sb.append("Brightness: unknown")
+        }
+
+        val nightMode = activity.resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        val isDark = nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        sb.append(", Dark mode: ").append(if (isDark) "ON" else "OFF")
+
+        try {
+            val autoBrightness = Settings.System.getInt(activity.contentResolver,
+                Settings.System.SCREEN_BRIGHTNESS_MODE)
+            sb.append(", Auto-brightness: ").append(if (autoBrightness == 1) "ON" else "OFF")
+        } catch (_: Settings.SettingNotFoundException) {}
+
+        return sb.toString()
+    }
+
+    private fun getDeviceDetails(): String {
+        val sb = StringBuilder()
+        sb.append("Android ").append(android.os.Build.VERSION.RELEASE)
+        sb.append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")")
+        sb.append(", Model: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL)
+        sb.append(", Build: ").append(android.os.Build.DISPLAY)
+        val security = android.os.Build.VERSION.SECURITY_PATCH
+        if (!security.isNullOrEmpty()) {
+            sb.append(", Security patch: ").append(security)
+        }
+        return sb.toString()
+    }
+
+    private fun getCurrentTime(): String {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", java.util.Locale.getDefault())
+        val localTime = sdf.format(java.util.Date())
+        val tz = java.util.TimeZone.getDefault()
+        return "Current time: $localTime (timezone: ${tz.id}, UTC offset: ${tz.rawOffset / 3600000}h)"
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        return if (bytes >= 1_000_000_000L) {
+            String.format("%.1f GB", bytes / 1_000_000_000.0)
+        } else {
+            String.format("%.0f MB", bytes / 1_000_000.0)
+        }
     }
 
     // -----------------------------------------------------------------------

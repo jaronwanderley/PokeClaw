@@ -14,6 +14,10 @@
     "pokeclaw:allow-get-session-status",
     "pokeclaw:allow-list-models",
     "pokeclaw:allow-download-model",
+    "pokeclaw:allow-get-screen-info",
+    "pokeclaw:allow-find-node-info",
+    "pokeclaw:allow-get-device-info",
+    "pokeclaw:allow-check-permissions",
     "dialog:default"
   ]
 }
