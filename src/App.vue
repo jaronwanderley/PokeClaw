@@ -1,9 +1,20 @@
 <script setup lang="ts">
+import { ref, watch, nextTick } from 'vue'
 import { useChat } from './composables/useChat'
 import ChatMessage from './components/ChatMessage.vue'
 import MessageInput from './components/MessageInput.vue'
 
 const { messages, sendMessage } = useChat()
+const chatRef = ref<HTMLElement | null>(null)
+
+watch(
+  () => messages.value.length,
+  () => {
+    nextTick(() => {
+      chatRef.value?.scrollTo({ top: chatRef.value.scrollHeight, behavior: 'smooth' })
+    })
+  },
+)
 </script>
 
 <template>
@@ -22,7 +33,7 @@ const { messages, sendMessage } = useChat()
         </svg>
       </div>
     </div>
-    <div class="chat">
+    <div class="chat" ref="chatRef">
       <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
     </div>
     <div class="ia">
