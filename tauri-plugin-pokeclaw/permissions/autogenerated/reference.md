@@ -426,6 +426,32 @@ Denies the open_app command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-open-permission-settings`
+
+</td>
+<td>
+
+Enables the open_permission_settings command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-open-permission-settings`
+
+</td>
+<td>
+
+Denies the open_permission_settings command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-ping`
 
 </td>

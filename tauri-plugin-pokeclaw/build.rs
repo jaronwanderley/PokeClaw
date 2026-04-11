@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "clipboard",
     "get_installed_apps",
     "make_call",
+    "open_permission_settings",
 ];
 
 fn main() {

@@ -1180,6 +1180,25 @@ mod desktop_commands {
             error: None,
         }
     }
+
+    /// Desktop mock for open_permission_settings. Simulates opening an Android
+    /// settings page for accessibility, notifications, or foreground service.
+    #[tauri::command]
+    pub fn open_permission_settings(target: String) -> ToolResult {
+        log::info!("open_permission_settings (desktop mock): target='{}'", target);
+        match target.as_str() {
+            "accessibility" | "notifications" | "foreground" => ToolResult {
+                success: true,
+                data: Some(serde_json::json!({ "opened": format!("{target} settings") })),
+                error: None,
+            },
+            _ => ToolResult {
+                success: false,
+                data: None,
+                error: Some(format!("Unknown permission target: {target}")),
+            },
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1232,6 +1251,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::clipboard,
             desktop_commands::get_installed_apps,
             desktop_commands::make_call,
+            desktop_commands::open_permission_settings,
         ]);
 
     builder.build()

@@ -33,6 +33,7 @@
     "pokeclaw:allow-clipboard",
     "pokeclaw:allow-get-installed-apps",
     "pokeclaw:allow-make-call",
+    "pokeclaw:allow-open-permission-settings",
     "dialog:default"
   ]
 }

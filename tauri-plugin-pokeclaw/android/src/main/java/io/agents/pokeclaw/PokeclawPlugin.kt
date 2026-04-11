@@ -1312,6 +1312,58 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
+     * Open an Android Settings page for the given permission target.
+     *
+     * Args: target (String, required — "accessibility", "notifications", or "foreground")
+     * Returns: { success: Boolean, data: { opened: String }, error: String? }
+     */
+    @Command
+    fun open_permission_settings(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val target = args.getString("target")
+            ?.trim()
+            ?: return invoke.reject("target is required (accessibility, notifications, or foreground)")
+
+        Log.i(TAG, "open_permission_settings: target='$target'")
+
+        try {
+            val intent = when (target.lowercase()) {
+                "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                "notifications" -> Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+                "foreground" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", activity.packageName, null)
+                }
+                else -> {
+                    Log.w(TAG, "open_permission_settings: unknown target '$target'")
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", null)
+                    result.put("error", "Unknown permission target: '$target'. Use 'accessibility', 'notifications', or 'foreground'.")
+                    invoke.resolve(result)
+                    return
+                }
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(intent)
+
+            Log.i(TAG, "open_permission_settings: opened '$target' settings")
+            val result = JSObject()
+            result.put("success", true)
+            result.put("data", JSObject().put("opened", "$target settings"))
+            result.put("error", null as String?)
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "open_permission_settings: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "open_permission_settings failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
      * Take a screenshot of the current screen and return the file path.
      *
      * Uses the accessibility service's takeScreenshot API (API 30+).
