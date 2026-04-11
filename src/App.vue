@@ -2,6 +2,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { useChat } from './composables/useChat'
 import { useModel } from './composables/useModel'
+import { useAccessibility } from './composables/useAccessibility'
 import ChatMessage from './components/ChatMessage.vue'
 import MessageInput from './components/MessageInput.vue'
 import ModelPicker from './components/ModelPicker.vue'
@@ -9,8 +10,10 @@ import SettingsPanel from './components/SettingsPanel.vue'
 
 const { messages, streamingText, isStreaming, sessionStatus, sendMessage, setSessionStatus } = useChat()
 const { preferGpu } = useModel()
+const { screenTree, isLoading: isScreenLoading, error: screenError, fetchScreenInfo } = useAccessibility()
 const chatRef = ref<HTMLElement | null>(null)
 const showSettings = ref(false)
+const showDebug = ref(false)
 
 function scrollToBottom() {
   nextTick(() => {
@@ -93,6 +96,20 @@ function handleSettingsClose() {
         <MessageInput :disabled="isStreaming" @send="sendMessage" />
       </div>
     </template>
+
+    <!-- Debug: Accessibility Screen Info -->
+    <div v-if="sessionStatus === 'ready'" class="debug-section">
+      <button class="debug-toggle" @click="showDebug = !showDebug">
+        {{ showDebug ? '▾ Screen Info' : '▸ Screen Info' }}
+      </button>
+      <div v-if="showDebug" class="debug-content">
+        <button class="debug-fetch-btn" :disabled="isScreenLoading" @click="fetchScreenInfo">
+          {{ isScreenLoading ? 'Loading...' : 'Fetch Screen Tree' }}
+        </button>
+        <div v-if="screenError" class="debug-error">{{ screenError }}</div>
+        <pre v-if="screenTree" class="debug-tree">{{ screenTree }}</pre>
+      </div>
+    </div>
 
     <!-- Settings panel -->
     <SettingsPanel :visible="showSettings" @close="handleSettingsClose" @backend-changed="() => {}" />
@@ -308,5 +325,76 @@ function handleSettingsClose() {
 @keyframes dot-bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
   30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Debug section */
+.debug-section {
+  flex-shrink: 0;
+  border-top: 1px solid var(--div);
+  background: var(--surface);
+  padding: 8px 16px;
+}
+
+.debug-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--t2);
+  padding: 4px 0;
+  width: 100%;
+  text-align: left;
+}
+
+.debug-toggle:hover {
+  color: var(--t1);
+}
+
+.debug-content {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.debug-fetch-btn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--ai);
+  color: var(--t1);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.debug-fetch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.debug-error {
+  font-size: 12px;
+  color: #e57373;
+  padding: 4px 8px;
+  background: rgba(229, 115, 115, 0.1);
+  border-radius: 4px;
+}
+
+.debug-tree {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--t2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
 }
 </style>
