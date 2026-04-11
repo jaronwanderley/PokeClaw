@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { useChat } from './composables/useChat'
+import { useModel } from './composables/useModel'
 import ChatMessage from './components/ChatMessage.vue'
 import MessageInput from './components/MessageInput.vue'
+import ModelPicker from './components/ModelPicker.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 
-const { messages, streamingText, isStreaming, sendMessage } = useChat()
+const { messages, streamingText, isStreaming, sessionStatus, sendMessage, setSessionStatus } = useChat()
+const { preferGpu } = useModel()
 const chatRef = ref<HTMLElement | null>(null)
+const showSettings = ref(false)
 
 function scrollToBottom() {
   nextTick(() => {
@@ -21,6 +26,14 @@ watch(
 
 // Auto-scroll as streaming tokens arrive
 watch(streamingText, scrollToBottom)
+
+function handleSessionStarted() {
+  setSessionStatus('ready')
+}
+
+function handleSettingsClose() {
+  showSettings.value = false
+}
 </script>
 
 <template>
@@ -33,32 +46,56 @@ watch(streamingText, scrollToBottom)
         <div class="tb-t">Poke<b>Claw</b></div>
       </div>
       <div class="tb-right">
-        <div class="tb-b">Local AI</div>
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="#7A6E64" class="tb-icon">
-          <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94L14.4 2.81a.47.47 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41L9.25 5.35c-.59.24-1.13.57-1.62.94L5.24 5.33a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.61 3.61 0 0112 15.6z" />
-        </svg>
+        <div v-if="sessionStatus === 'ready'" class="tb-b" :class="{ 'tb-gpu': preferGpu, 'tb-cpu': !preferGpu }">
+          {{ preferGpu ? 'GPU' : 'CPU' }}
+        </div>
+        <div v-else-if="sessionStatus === 'loading'" class="tb-b tb-loading">Loading...</div>
+        <div v-else class="tb-b tb-idle">No Model</div>
+        <button class="tb-gear" @click="showSettings = !showSettings">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="#7A6E64">
+            <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94L14.4 2.81a.47.47 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41L9.25 5.35c-.59.24-1.13.57-1.62.94L5.24 5.33a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.61 3.61 0 0112 15.6z" />
+          </svg>
+        </button>
       </div>
     </div>
-    <div class="chat" ref="chatRef">
-      <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
-      <!-- Streaming message bubble -->
-      <div v-if="isStreaming && streamingText" class="msg msg-a streaming-msg">
-        <span class="msg-avatar">🤖</span>
-        <div class="msg-bubble">
-          {{ streamingText }}<span class="cursor"></span>
+
+    <!-- Model picker when idle -->
+    <div v-if="sessionStatus === 'idle'" class="model-area">
+      <ModelPicker @session-started="handleSessionStarted" />
+    </div>
+
+    <!-- Loading indicator -->
+    <div v-else-if="sessionStatus === 'loading'" class="loading-area">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Loading model...</div>
+    </div>
+
+    <!-- Chat UI when session is ready -->
+    <template v-else-if="sessionStatus === 'ready'">
+      <div class="chat" ref="chatRef">
+        <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
+        <!-- Streaming message bubble -->
+        <div v-if="isStreaming && streamingText" class="msg msg-a streaming-msg">
+          <span class="msg-avatar">🤖</span>
+          <div class="msg-bubble">
+            {{ streamingText }}<span class="cursor"></span>
+          </div>
+        </div>
+        <!-- Typing indicator when streaming starts but no tokens yet -->
+        <div v-else-if="isStreaming" class="msg msg-a streaming-msg">
+          <span class="msg-avatar">🤖</span>
+          <div class="msg-bubble typing-dots">
+            <span></span><span></span><span></span>
+          </div>
         </div>
       </div>
-      <!-- Typing indicator when streaming starts but no tokens yet -->
-      <div v-else-if="isStreaming" class="msg msg-a streaming-msg">
-        <span class="msg-avatar">🤖</span>
-        <div class="msg-bubble typing-dots">
-          <span></span><span></span><span></span>
-        </div>
+      <div class="ia">
+        <MessageInput :disabled="isStreaming" @send="sendMessage" />
       </div>
-    </div>
-    <div class="ia">
-      <MessageInput :disabled="isStreaming" @send="sendMessage" />
-    </div>
+    </template>
+
+    <!-- Settings panel -->
+    <SettingsPanel :visible="showSettings" @close="handleSettingsClose" @backend-changed="() => {}" />
   </div>
 </template>
 
@@ -111,6 +148,83 @@ watch(streamingText, scrollToBottom)
   background: var(--ai);
   color: var(--accent);
   border: 1px solid var(--aib);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.tb-b.tb-gpu {
+  background: #2a4a2a;
+  color: #6fcf6f;
+  border-color: #3a6a3a;
+}
+
+.tb-b.tb-cpu {
+  background: #4a3a2a;
+  color: #cfaf6f;
+  border-color: #6a5a3a;
+}
+
+.tb-b.tb-loading {
+  animation: pulse-bg 1.5s ease-in-out infinite;
+}
+
+.tb-b.tb-idle {
+  color: var(--t3);
+}
+
+@keyframes pulse-bg {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.tb-gear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.15s;
+}
+
+.tb-gear:hover {
+  background: var(--ai);
+}
+
+/* Model area (fills space when idle) */
+.model-area {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Loading area */
+.loading-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 14px;
+  color: var(--t2);
 }
 
 /* Chat area */

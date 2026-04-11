@@ -20,6 +20,29 @@ const sessionStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 let nextId = 1
 
 export function useChat() {
+  /**
+   * Fetch the current session status from the backend and update the ref.
+   * Rust returns SessionStatus serde enum; Kotlin returns { state, ... }.
+   */
+  async function updateSessionStatus(): Promise<void> {
+    try {
+      const result = await invoke<Record<string, unknown>>('get_session_status')
+      const state = (result.state as string ?? 'idle').toLowerCase() as 'idle' | 'loading' | 'ready' | 'error'
+      sessionStatus.value = state
+      console.log('[useChat] updateSessionStatus:', state)
+    } catch (err) {
+      console.error('[useChat] updateSessionStatus failed:', err)
+      sessionStatus.value = 'idle'
+    }
+  }
+
+  /**
+   * Set the session status directly (used by useModel after start/stop).
+   */
+  function setSessionStatus(status: 'idle' | 'loading' | 'ready' | 'error'): void {
+    sessionStatus.value = status
+  }
+
   async function sendStreamingMessage(text: string) {
     const onEvent = new Channel<StreamEvent>()
 
@@ -64,6 +87,17 @@ export function useChat() {
 
   function sendMessage(text: string) {
     if (!text.trim()) return
+
+    // Guard: only send when session is ready
+    if (sessionStatus.value !== 'ready') {
+      messages.value.push({
+        id: nextId++,
+        role: 'ai',
+        text: '[Error] No active session. Please load a model first.',
+      })
+      return
+    }
+
     const trimmed = text.trim()
     messages.value.push({
       id: nextId++,
@@ -75,5 +109,5 @@ export function useChat() {
     sendStreamingMessage(trimmed)
   }
 
-  return { messages, streamingText, isStreaming, sessionStatus, sendMessage }
+  return { messages, streamingText, isStreaming, sessionStatus, sendMessage, updateSessionStatus, setSessionStatus }
 }
