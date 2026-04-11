@@ -826,6 +826,303 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     // -----------------------------------------------------------------------
+    // Gesture @Command methods — bridge gesture primitives to IPC
+    // -----------------------------------------------------------------------
+
+    /**
+     * Perform a tap gesture at the specified screen coordinates.
+     *
+     * Args: x (int, required), y (int, required)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun tap(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val x: Int
+        val y: Int
+        try {
+            x = args.getInt("x")
+            y = args.getInt("y")
+        } catch (e: Exception) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "x and y are required integers")
+            invoke.resolve(result)
+            return
+        }
+
+        Log.i(TAG, "tap: x=$x, y=$y")
+
+        if (x < 0 || y < 0) {
+            Log.w(TAG, "tap: negative coordinates rejected ($x, $y)")
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Coordinates must be non-negative. Got x=$x, y=$y")
+            invoke.resolve(result)
+            return
+        }
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "tap: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val success = service.performTap(x, y)
+            Log.i(TAG, "tap: result=$success at ($x, $y)")
+            val result = JSObject()
+            result.put("success", success)
+            result.put("data", if (success) "Tapped at ($x, $y)" else null)
+            result.put("error", if (success) null else "Gesture dispatch failed — system may have rejected or cancelled the gesture")
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "tap: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Tap failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Perform a swipe gesture from one point to another.
+     *
+     * Args: start_x (int, required), start_y (int, required),
+     *       end_x (int, required), end_y (int, required),
+     *       duration_ms (int, optional, default 500)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun swipe(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val startX: Int
+        val startY: Int
+        val endX: Int
+        val endY: Int
+        try {
+            startX = args.getInt("start_x")
+            startY = args.getInt("start_y")
+            endX = args.getInt("end_x")
+            endY = args.getInt("end_y")
+        } catch (e: Exception) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "start_x, start_y, end_x, end_y are required integers")
+            invoke.resolve(result)
+            return
+        }
+        val durationMs = args.optInt("duration_ms", 500)
+
+        Log.i(TAG, "swipe: ($startX,$startY) → ($endX,$endY), duration_ms=$durationMs")
+
+        if (startX < 0 || startY < 0 || endX < 0 || endY < 0) {
+            Log.w(TAG, "swipe: negative coordinates rejected")
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "All coordinates must be non-negative. Got start=($startX,$startY) end=($endX,$endY)")
+            invoke.resolve(result)
+            return
+        }
+
+        if (durationMs < 0) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "duration_ms must be non-negative. Got $durationMs")
+            invoke.resolve(result)
+            return
+        }
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "swipe: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val success = service.performSwipe(startX, startY, endX, endY, durationMs.toLong())
+            Log.i(TAG, "swipe: result=$success ($startX,$startY) → ($endX,$endY)")
+            val result = JSObject()
+            result.put("success", success)
+            result.put("data", if (success) "Swiped from ($startX,$startY) to ($endX,$endY) in ${durationMs}ms" else null)
+            result.put("error", if (success) null else "Gesture dispatch failed — system may have rejected or cancelled the gesture")
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "swipe: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Swipe failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Perform a long-press gesture at the specified coordinates.
+     *
+     * Args: x (int, required), y (int, required),
+     *       duration_ms (int, optional, default 1000)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun long_press(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val x: Int
+        val y: Int
+        try {
+            x = args.getInt("x")
+            y = args.getInt("y")
+        } catch (e: Exception) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "x and y are required integers")
+            invoke.resolve(result)
+            return
+        }
+        val durationMs = args.optInt("duration_ms", 1000)
+
+        Log.i(TAG, "long_press: x=$x, y=$y, duration_ms=$durationMs")
+
+        if (x < 0 || y < 0) {
+            Log.w(TAG, "long_press: negative coordinates rejected ($x, $y)")
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Coordinates must be non-negative. Got x=$x, y=$y")
+            invoke.resolve(result)
+            return
+        }
+
+        if (durationMs < 0) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "duration_ms must be non-negative. Got $durationMs")
+            invoke.resolve(result)
+            return
+        }
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "long_press: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val success = service.performLongPress(x, y, durationMs.toLong())
+            Log.i(TAG, "long_press: result=$success at ($x, $y) for ${durationMs}ms")
+            val result = JSObject()
+            result.put("success", success)
+            result.put("data", if (success) "Long-pressed at ($x, $y) for ${durationMs}ms" else null)
+            result.put("error", if (success) null else "Gesture dispatch failed — system may have rejected or cancelled the gesture")
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "long_press: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Long press failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Tap an accessibility node by its ID (e.g. "n3").
+     *
+     * Resolves the node's center coordinates from the nodeIdMap populated by
+     * the most recent get_screen_info call, then performs a tap at that location.
+     *
+     * Args: node_id (String, required)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun tap_node(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val rawNodeId = args.getString("node_id")
+        if (rawNodeId.isNullOrBlank()) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "node_id is required")
+            invoke.resolve(result)
+            return
+        }
+
+        // Normalize: strip brackets if user passes "[n3]"
+        val nodeId = rawNodeId.trim().removeSurrounding("[", "]")
+        Log.i(TAG, "tap_node: rawNodeId='$rawNodeId', normalized='$nodeId'")
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "tap_node: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            val coords = service.getNodeCoordinates(nodeId)
+            if (coords == null) {
+                Log.w(TAG, "tap_node: node '$nodeId' not found in nodeIdMap")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Node '$nodeId' not found. Call get_screen_info first to refresh node IDs.")
+                invoke.resolve(result)
+                return
+            }
+
+            val x = coords[0]
+            val y = coords[1]
+            Log.i(TAG, "tap_node: resolved '$nodeId' → ($x, $y), performing tap")
+
+            val success = service.performTap(x, y)
+            Log.i(TAG, "tap_node: result=$success for node '$nodeId' at ($x, $y)")
+            val result = JSObject()
+            result.put("success", success)
+            result.put("data", if (success) "Tapped node '$nodeId' at ($x, $y)" else null)
+            result.put("error", if (success) null else "Gesture dispatch failed — system may have rejected or cancelled the gesture")
+            invoke.resolve(result)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "tap_node: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "tap_node failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Device info helpers (ported from legacy GetDeviceInfoTool)
     // -----------------------------------------------------------------------
 
