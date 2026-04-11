@@ -930,7 +930,8 @@ mod desktop_commands {
             };
         }
         // Resolve common names like the Kotlin WELL_KNOWN_APPS map
-        let resolved_package = match app_name.to_lowercase().as_str() {
+        let app_name_lower = app_name.to_lowercase();
+        let resolved_package = match app_name_lower.as_str() {
             "whatsapp" => "com.whatsapp",
             "telegram" => "org.telegram.messenger",
             "messages" | "sms" => "com.google.android.apps.messaging",

@@ -319,6 +319,18 @@
           "markdownDescription": "Denies the check_permissions command without any pre-configured scope."
         },
         {
+          "description": "Enables the clipboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clipboard",
+          "markdownDescription": "Enables the clipboard command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clipboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clipboard",
+          "markdownDescription": "Denies the clipboard command without any pre-configured scope."
+        },
+        {
           "description": "Enables the download_model command without any pre-configured scope.",
           "type": "string",
           "const": "allow-download-model",
@@ -365,6 +377,30 @@
           "type": "string",
           "const": "deny-get-device-info",
           "markdownDescription": "Denies the get_device_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_installed_apps command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-installed-apps",
+          "markdownDescription": "Enables the get_installed_apps command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_installed_apps command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-installed-apps",
+          "markdownDescription": "Denies the get_installed_apps command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_notifications command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-notifications",
+          "markdownDescription": "Enables the get_notifications command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_notifications command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-notifications",
+          "markdownDescription": "Denies the get_notifications command without any pre-configured scope."
         },
         {
           "description": "Enables the get_screen_info command without any pre-configured scope.",
@@ -427,6 +463,30 @@
           "markdownDescription": "Denies the long_press command without any pre-configured scope."
         },
         {
+          "description": "Enables the make_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-make-call",
+          "markdownDescription": "Enables the make_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the make_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-make-call",
+          "markdownDescription": "Denies the make_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-app",
+          "markdownDescription": "Enables the open_app command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-app",
+          "markdownDescription": "Denies the open_app command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ping command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ping",
@@ -449,6 +509,18 @@
           "type": "string",
           "const": "deny-scroll-to-find",
           "markdownDescription": "Denies the scroll_to_find command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the send_chat_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-send-chat-message",
+          "markdownDescription": "Enables the send_chat_message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the send_chat_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-send-chat-message",
+          "markdownDescription": "Denies the send_chat_message command without any pre-configured scope."
         },
         {
           "description": "Enables the send_message command without any pre-configured scope.",
@@ -497,6 +569,30 @@
           "type": "string",
           "const": "deny-swipe",
           "markdownDescription": "Denies the swipe command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the system_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-system-key",
+          "markdownDescription": "Enables the system_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the system_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-system-key",
+          "markdownDescription": "Denies the system_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-screenshot",
+          "markdownDescription": "Enables the take_screenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-screenshot",
+          "markdownDescription": "Denies the take_screenshot command without any pre-configured scope."
         },
         {
           "description": "Enables the tap command without any pre-configured scope.",

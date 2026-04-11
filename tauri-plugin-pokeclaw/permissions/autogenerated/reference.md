@@ -62,6 +62,32 @@ Denies the check_permissions command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-clipboard`
+
+</td>
+<td>
+
+Enables the clipboard command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-clipboard`
+
+</td>
+<td>
+
+Denies the clipboard command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-download-model`
 
 </td>
@@ -159,6 +185,58 @@ Enables the get_device_info command without any pre-configured scope.
 <td>
 
 Denies the get_device_info command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-get-installed-apps`
+
+</td>
+<td>
+
+Enables the get_installed_apps command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-get-installed-apps`
+
+</td>
+<td>
+
+Denies the get_installed_apps command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-get-notifications`
+
+</td>
+<td>
+
+Enables the get_notifications command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-get-notifications`
+
+</td>
+<td>
+
+Denies the get_notifications command without any pre-configured scope.
 
 </td>
 </tr>
@@ -296,6 +374,58 @@ Denies the long_press command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-make-call`
+
+</td>
+<td>
+
+Enables the make_call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-make-call`
+
+</td>
+<td>
+
+Denies the make_call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-open-app`
+
+</td>
+<td>
+
+Enables the open_app command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-open-app`
+
+</td>
+<td>
+
+Denies the open_app command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-ping`
 
 </td>
@@ -341,6 +471,32 @@ Enables the scroll_to_find command without any pre-configured scope.
 <td>
 
 Denies the scroll_to_find command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-send-chat-message`
+
+</td>
+<td>
+
+Enables the send_chat_message command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-send-chat-message`
+
+</td>
+<td>
+
+Denies the send_chat_message command without any pre-configured scope.
 
 </td>
 </tr>
@@ -445,6 +601,58 @@ Enables the swipe command without any pre-configured scope.
 <td>
 
 Denies the swipe command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-system-key`
+
+</td>
+<td>
+
+Enables the system_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-system-key`
+
+</td>
+<td>
+
+Denies the system_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-take-screenshot`
+
+</td>
+<td>
+
+Enables the take_screenshot command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-take-screenshot`
+
+</td>
+<td>
+
+Denies the take_screenshot command without any pre-configured scope.
 
 </td>
 </tr>

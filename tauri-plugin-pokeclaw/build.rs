@@ -18,6 +18,14 @@ const COMMANDS: &[&str] = &[
     "input_text",
     "scroll_to_find",
     "find_and_tap",
+    "get_notifications",
+    "open_app",
+    "system_key",
+    "send_chat_message",
+    "take_screenshot",
+    "clipboard",
+    "get_installed_apps",
+    "make_call",
 ];
 
 fn main() {

@@ -264,6 +264,161 @@ export function useAccessibility() {
     }
   }
 
+  // -----------------------------------------------------------------
+  // Notification / navigation / compound tool methods (S03)
+  // -----------------------------------------------------------------
+
+  /**
+   * Get active notifications from PokeNotificationListener.
+   * Returns array of notification objects with package_name, key, post_time, etc.
+   */
+  async function getNotifications(): Promise<Record<string, unknown>[] | null> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('get_notifications')
+      if (result.success && result.data) {
+        return (result.data as Record<string, unknown>).notifications as Record<string, unknown>[]
+      } else {
+        error.value = result.error ?? 'get_notifications returned failure'
+        return null
+      }
+    } catch (err) {
+      error.value = String(err)
+      return null
+    }
+  }
+
+  /**
+   * Open an app by name or package name.
+   * Supports well-known names like "whatsapp", "telegram", etc.
+   */
+  async function openApp(appName: string): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('open_app', { app_name: appName })
+      if (!result.success) {
+        error.value = result.error ?? 'open_app returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Press a system key action.
+   * Supported: back, home, recent_apps, notifications, collapse_notifications, lock_screen, unlock_screen
+   */
+  async function systemKey(action: string): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('system_key', { action })
+      if (!result.success) {
+        error.value = result.error ?? 'system_key returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Send a chat message to a contact via a messaging app.
+   * Compound flow: open app → find contact → type message → send.
+   */
+  async function sendChatMessage(
+    app: string,
+    contact: string,
+    message: string,
+  ): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('send_chat_message', { app, contact, message })
+      if (!result.success) {
+        error.value = result.error ?? 'send_chat_message returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Take a screenshot and save to file.
+   * Returns file path, width, and height of the captured image.
+   */
+  async function takeScreenshot(filePath?: string): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('take_screenshot', { file_path: filePath })
+      if (!result.success) {
+        error.value = result.error ?? 'take_screenshot returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Get or set the system clipboard content.
+   * @param action "get" or "set"
+   * @param text Text to set (required when action is "set")
+   */
+  async function clipboard(action: string, text?: string): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('clipboard', { action, text })
+      if (!result.success) {
+        error.value = result.error ?? 'clipboard returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
+  /**
+   * Get list of installed apps. Optionally filter by app/package name.
+   */
+  async function getInstalledApps(filter?: string): Promise<Record<string, unknown>[] | null> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('get_installed_apps', { filter })
+      if (result.success && result.data) {
+        return (result.data as Record<string, unknown>).apps as Record<string, unknown>[]
+      } else {
+        error.value = result.error ?? 'get_installed_apps returned failure'
+        return null
+      }
+    } catch (err) {
+      error.value = String(err)
+      return null
+    }
+  }
+
+  /**
+   * Open the dialer with a phone number or contact name.
+   */
+  async function makeCall(target: string): Promise<ToolResult> {
+    error.value = null
+    try {
+      const result = await invoke<ToolResult>('make_call', { target })
+      if (!result.success) {
+        error.value = result.error ?? 'make_call returned failure'
+      }
+      return result
+    } catch (err) {
+      error.value = String(err)
+      return { success: false, error: String(err) }
+    }
+  }
+
   return {
     screenTree,
     isLoading,
@@ -279,5 +434,13 @@ export function useAccessibility() {
     inputText,
     scrollToFind,
     findAndTap,
+    getNotifications,
+    openApp,
+    systemKey,
+    sendChatMessage,
+    takeScreenshot,
+    clipboard,
+    getInstalledApps,
+    makeCall,
   }
 }

@@ -25,6 +25,14 @@
     "pokeclaw:allow-input-text",
     "pokeclaw:allow-scroll-to-find",
     "pokeclaw:allow-find-and-tap",
+    "pokeclaw:allow-get-notifications",
+    "pokeclaw:allow-open-app",
+    "pokeclaw:allow-system-key",
+    "pokeclaw:allow-send-chat-message",
+    "pokeclaw:allow-take-screenshot",
+    "pokeclaw:allow-clipboard",
+    "pokeclaw:allow-get-installed-apps",
+    "pokeclaw:allow-make-call",
     "dialog:default"
   ]
 }
