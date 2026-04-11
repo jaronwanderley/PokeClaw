@@ -873,6 +873,312 @@ mod desktop_commands {
             error: None,
         }
     }
+
+    // -----------------------------------------------------------------
+    // New tool desktop mocks (T04 — S03)
+    // -----------------------------------------------------------------
+
+    /// Desktop mock for get_notifications. Returns a sample list of
+    /// notification objects matching the format produced by
+    /// PokeNotificationListener.getActiveNotificationsList().
+    #[tauri::command]
+    pub fn get_notifications() -> ToolResult {
+        log::info!("get_notifications (desktop mock): returning sample notifications");
+        let notifications = serde_json::json!([
+            {
+                "package_name": "com.whatsapp",
+                "key": "0|com.whatsapp|1|null|10001",
+                "post_time": 1712890800000_i64,
+                "ticker_text": "John: Hey, are you free?",
+                "is_ongoing": false,
+                "is_clearable": true
+            },
+            {
+                "package_name": "org.telegram.messenger",
+                "key": "0|org.telegram.messenger|3|null|10002",
+                "post_time": 1712890500000_i64,
+                "ticker_text": "Alice: Meeting at 3pm",
+                "is_ongoing": false,
+                "is_clearable": true
+            },
+            {
+                "package_name": "com.google.android.apps.messaging",
+                "key": "0|com.google.android.apps.messaging|2|null|10003",
+                "post_time": 1712889900000_i64,
+                "ticker_text": "Bob: On my way",
+                "is_ongoing": false,
+                "is_clearable": true
+            }
+        ]);
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "notifications": notifications })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for open_app. Simulates launching an app by package name
+    /// or well-known app name. Returns an error if app_name is empty.
+    #[tauri::command]
+    pub fn open_app(app_name: String) -> ToolResult {
+        log::info!("open_app (desktop mock): app_name='{}'", app_name);
+        if app_name.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("app_name parameter must not be empty".into()),
+            };
+        }
+        // Resolve common names like the Kotlin WELL_KNOWN_APPS map
+        let resolved_package = match app_name.to_lowercase().as_str() {
+            "whatsapp" => "com.whatsapp",
+            "telegram" => "org.telegram.messenger",
+            "messages" | "sms" => "com.google.android.apps.messaging",
+            "phone" | "dialer" => "com.google.android.dialer",
+            "chrome" | "browser" => "com.android.chrome",
+            "settings" => "com.android.settings",
+            "camera" => "com.android.camera",
+            "gmail" | "email" => "com.google.android.gm",
+            "maps" => "com.google.android.apps.maps",
+            "youtube" => "com.google.android.youtube",
+            "instagram" => "com.instagram.android",
+            "facebook" => "com.facebook.katana",
+            "twitter" | "x" => "com.twitter.android",
+            "tiktok" => "com.zhiliaoapp.musically",
+            "spotify" => "com.spotify.music",
+            "discord" => "com.discord",
+            "signal" => "org.thoughtcrime.securesms",
+            "slack" => "com.Slack",
+            "line" => "jp.naver.line.android",
+            "snapchat" => "com.snapchat.android",
+            "wechat" => "com.tencent.mm",
+            "kakao" => "com.kakao.talk",
+            "teams" => "com.microsoft.teams",
+            "zoom" => "us.zoom.videomeetings",
+            "netflix" => "com.netflix.mediaclient",
+            "calendar" => "com.google.android.calendar",
+            "clock" => "com.google.android.deskclock",
+            "calculator" => "com.google.android.calculator",
+            other => other, // Assume it's already a package name
+        };
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({
+                "message": format!("Opened app '{}' (package: {})", app_name, resolved_package),
+                "package": resolved_package,
+            })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for system_key. Simulates pressing a system key
+    /// (back, home, recent_apps, notifications, collapse_notifications,
+    /// lock_screen, unlock_screen). Returns an error for unknown actions.
+    #[tauri::command]
+    pub fn system_key(action: String) -> ToolResult {
+        log::info!("system_key (desktop mock): action='{}'", action);
+        let valid_actions = [
+            "back",
+            "home",
+            "recent_apps",
+            "notifications",
+            "collapse_notifications",
+            "lock_screen",
+            "unlock_screen",
+        ];
+        let action_lower = action.to_lowercase();
+        if !valid_actions.contains(&action_lower.as_str()) {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some(format!(
+                    "Unknown system key action '{}'. Supported: {}",
+                    action,
+                    valid_actions.join(", ")
+                )),
+            };
+        }
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({
+                "message": format!("Pressed system key: {}", action_lower),
+                "action": action_lower,
+            })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for send_chat_message. Simulates the compound flow:
+    /// open app → find contact → type message → send.
+    /// Returns realistic step-by-step result data.
+    #[tauri::command]
+    pub fn send_chat_message(
+        app: String,
+        contact: String,
+        message: String,
+    ) -> ToolResult {
+        log::info!(
+            "send_chat_message (desktop mock): app='{}', contact='{}', message='{}'",
+            app, contact, message
+        );
+        if app.trim().is_empty() || contact.trim().is_empty() || message.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("app, contact, and message parameters must not be empty".into()),
+            };
+        }
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({
+                "steps": [
+                    { "step": "resolve_app", "status": "ok", "detail": format!("Resolved '{}' to package", app) },
+                    { "step": "open_app", "status": "ok", "detail": format!("Opened {}", app) },
+                    { "step": "find_contact", "status": "ok", "detail": format!("Found contact '{}'", contact) },
+                    { "step": "tap_contact", "status": "ok", "detail": format!("Tapped on '{}'", contact) },
+                    { "step": "type_message", "status": "ok", "detail": format!("Typed message: '{}'", message) },
+                    { "step": "send", "status": "ok", "detail": "Message sent successfully" },
+                ],
+                "message": format!("Sent '{}' to {} via {}", message, contact, app),
+            })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for take_screenshot. Returns a mock file path for
+    /// the captured screenshot.
+    #[tauri::command]
+    pub fn take_screenshot(file_path: Option<String>) -> ToolResult {
+        let path = file_path.unwrap_or_else(|| "/tmp/screenshots/screenshot_mock.png".into());
+        log::info!("take_screenshot (desktop mock): file_path='{}'", path);
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({
+                "message": format!("Screenshot saved to {}", path),
+                "file_path": path,
+                "width": 1080,
+                "height": 2400,
+            })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for clipboard. Supports "get" and "set" actions.
+    /// For "set", requires a text parameter. Returns clipboard content.
+    #[tauri::command]
+    pub fn clipboard(action: String, text: Option<String>) -> ToolResult {
+        log::info!("clipboard (desktop mock): action='{}', text={:?}", action, text);
+        let action_lower = action.to_lowercase();
+        match action_lower.as_str() {
+            "get" => ToolResult {
+                success: true,
+                data: Some(serde_json::json!({
+                    "message": "Clipboard content retrieved",
+                    "text": "Hello from mock clipboard",
+                })),
+                error: None,
+            },
+            "set" => {
+                let clip_text = text.unwrap_or_default();
+                if clip_text.trim().is_empty() {
+                    return ToolResult {
+                        success: false,
+                        data: None,
+                        error: Some("text parameter required for 'set' action".into()),
+                    };
+                }
+                ToolResult {
+                    success: true,
+                    data: Some(serde_json::json!({
+                        "message": format!("Clipboard set to: '{}'", clip_text),
+                        "text": clip_text,
+                    })),
+                    error: None,
+                }
+            }
+            _ => ToolResult {
+                success: false,
+                data: None,
+                error: Some(format!(
+                    "Unknown clipboard action '{}'. Supported: get, set",
+                    action
+                )),
+            },
+        }
+    }
+
+    /// Desktop mock for get_installed_apps. Returns a sample list of
+    /// installed apps. Supports optional filter matching against app name
+    /// and package name.
+    #[tauri::command]
+    pub fn get_installed_apps(filter: Option<String>) -> ToolResult {
+        log::info!("get_installed_apps (desktop mock): filter={:?}", filter);
+        let all_apps = serde_json::json!([
+            { "package_name": "com.whatsapp", "app_name": "WhatsApp", "is_system": false },
+            { "package_name": "org.telegram.messenger", "app_name": "Telegram", "is_system": false },
+            { "package_name": "com.google.android.apps.messaging", "app_name": "Messages", "is_system": true },
+            { "package_name": "com.google.android.dialer", "app_name": "Phone", "is_system": true },
+            { "package_name": "com.android.chrome", "app_name": "Chrome", "is_system": true },
+            { "package_name": "com.google.android.gms", "app_name": "Google Play Services", "is_system": true },
+            { "package_name": "com.instagram.android", "app_name": "Instagram", "is_system": false },
+            { "package_name": "com.spotify.music", "app_name": "Spotify", "is_system": false },
+        ]);
+        let filtered = if let Some(f) = filter {
+            if f.trim().is_empty() {
+                all_apps
+            } else {
+                let f_lower = f.to_lowercase();
+                let apps = all_apps.as_array().unwrap();
+                let matched: Vec<_> = apps
+                    .iter()
+                    .filter(|app| {
+                        let name = app
+                            .get("app_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        let pkg = app
+                            .get("package_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        name.contains(&f_lower) || pkg.contains(&f_lower)
+                    })
+                    .cloned()
+                    .collect();
+                serde_json::Value::Array(matched)
+            }
+        } else {
+            all_apps
+        };
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({ "apps": filtered })),
+            error: None,
+        }
+    }
+
+    /// Desktop mock for make_call. Simulates opening the dialer with the
+    /// given phone number or contact name. Returns an error if target is empty.
+    #[tauri::command]
+    pub fn make_call(target: String) -> ToolResult {
+        log::info!("make_call (desktop mock): target='{}'", target);
+        if target.trim().is_empty() {
+            return ToolResult {
+                success: false,
+                data: None,
+                error: Some("target parameter must not be empty".into()),
+            };
+        }
+        ToolResult {
+            success: true,
+            data: Some(serde_json::json!({
+                "message": format!("Calling '{}' via dialer", target),
+                "target": target,
+            })),
+            error: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -917,6 +1223,14 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::input_text,
             desktop_commands::scroll_to_find,
             desktop_commands::find_and_tap,
+            desktop_commands::get_notifications,
+            desktop_commands::open_app,
+            desktop_commands::system_key,
+            desktop_commands::send_chat_message,
+            desktop_commands::take_screenshot,
+            desktop_commands::clipboard,
+            desktop_commands::get_installed_apps,
+            desktop_commands::make_call,
         ]);
 
     builder.build()
