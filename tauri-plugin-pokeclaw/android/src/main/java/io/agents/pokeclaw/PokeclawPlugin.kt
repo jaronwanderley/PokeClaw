@@ -3,14 +3,21 @@ package io.agents.pokeclaw
 import android.app.Activity
 import android.util.Log
 import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Channel
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import app.tauri.plugin.Invoke
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 
 @TauriPlugin
 class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
@@ -29,6 +36,17 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
         /** Max send calls before forcing conversation recreation. */
         private const val MAX_SEND_COUNT = 8
+
+        /** Approximate chars per token for batch-size calculations. */
+        private const val CHARS_PER_TOKEN = 4
+    }
+
+    /** Args class for send_message with streaming Channel support. */
+    @InvokeArg
+    inner class SendMessageArgs {
+        lateinit var message: String
+        var batchSize: Int = 5
+        lateinit var onEvent: Channel
     }
 
     /** Active inference session, null when idle. */
@@ -36,6 +54,9 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
     /** Track whether GPU has failed to prevent retry loops. */
     private var gpuFailed = false
+
+    /** Coroutine scope for streaming inference, cancelled in onDestroy(). */
+    private val streamingScope = CoroutineScope(Dispatchers.Default + Job())
 
     // -----------------------------------------------------------------------
     // @Command methods — invoked from JS via Tauri plugin IPC
@@ -109,18 +130,31 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * Send a message to the active conversation and return the response.
+     * Send a message to the active conversation and stream the response back
+     * via a Tauri Channel.
      *
-     * Args: message (String)
-     * Returns: { response: String }
+     * Args (via SendMessageArgs): message (String), batchSize (Int, default 5),
+     *   onEvent (Channel — receives StreamEvent objects)
+     *
+     * Stream events sent via channel:
+     *   { event: "token_batch", data: { tokens: String, batch_index: Int } }
+     *   { event: "complete", data: { full_text: String, token_count: Int } }
+     *   { event: "error", data: { message: String } }
      */
     @Command
     fun send_message(invoke: Invoke) {
-        val args = invoke.getArgs()
-        val message = args.getString("message")
-            ?: return invoke.reject("message is required")
+        val args: SendMessageArgs
+        try {
+            args = invoke.parseArgs(SendMessageArgs::class.java)
+        } catch (e: Exception) {
+            return invoke.reject("Invalid arguments: ${e.message}", e)
+        }
 
-        Log.i(TAG, "send_message: '${message.take(80)}...'")
+        val message = args.message
+        val batchSize = args.batchSize.coerceAtLeast(1)
+        val channel = args.onEvent
+
+        Log.i(TAG, "send_message: '${message.take(80)}...', batchSize=$batchSize, channelId=${channel.id}")
 
         val currentSession = session
             ?: return invoke.reject("No active session. Call start_session first.")
@@ -144,39 +178,208 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
             }
         }
 
-        try {
-            val activeSession = session!!
-            val response = activeSession.conversation.sendMessage(message)
-            activeSession.recordSend()
+        val activeSession = session!!
 
-            val responseText = response?.toString() ?: ""
-            Log.d(TAG, "send_message: response (${responseText.length} chars), sendCount=${activeSession.sendCount}")
+        Log.i(TAG, "send_message: starting async streaming inference")
 
-            val result = JSObject()
-            result.put("response", responseText)
-            invoke.resolve(result)
+        // Launch streaming on a coroutine — this method returns immediately
+        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+            val fullText = StringBuilder()
+            val batchBuffer = StringBuilder()
+            var batchIndex = 0
+            var accumulatedLength = 0
+            val batchThreshold = batchSize * CHARS_PER_TOKEN
 
-        } catch (e: Exception) {
-            Log.e(TAG, "send_message: failed — ${e.message}")
+            try {
+                activeSession.conversation.sendMessageAsync(
+                    message,
+                    object : MessageCallback {
+                        override fun onMessage(msg: com.google.ai.edge.litertlm.Message) {
+                            val newText = msg?.toString() ?: ""
+                            if (newText.isEmpty()) return
 
-            // GPU failure during inference — fallback to CPU and retry once
-            if (!gpuFailed && isGpuBackendFailure(e)) {
-                Log.w(TAG, "send_message: GPU inference failed, falling back to CPU")
-                try {
-                    fallbackToCpu(currentSession.modelPath)
-                    val retryResponse = session!!.conversation.sendMessage(message)
-                    session!!.recordSend()
+                            // Detect token granularity: accumulated vs incremental
+                            val delta: String
+                            if (newText.length > accumulatedLength) {
+                                // Accumulated mode — extract just the new part
+                                delta = newText.substring(accumulatedLength)
+                                accumulatedLength = newText.length
+                            } else {
+                                // Incremental mode — use the full text as the delta
+                                delta = newText
+                                accumulatedLength += newText.length
+                            }
 
-                    val result = JSObject()
-                    result.put("response", retryResponse?.toString() ?: "")
-                    invoke.resolve(result)
-                } catch (retryError: Exception) {
-                    Log.e(TAG, "send_message: CPU retry also failed: ${retryError.message}")
-                    invoke.reject("Inference failed even after CPU fallback: ${retryError.message}", retryError)
-                }
-            } else {
-                invoke.reject("Inference failed: ${e.message}", e)
+                            fullText.append(delta)
+                            batchBuffer.append(delta)
+
+                            // Send batch when buffer exceeds threshold
+                            if (batchBuffer.length >= batchThreshold) {
+                                sendTokenBatch(channel, batchBuffer.toString(), batchIndex)
+                                Log.d(TAG, "send_message: batch $batchIndex sent (${batchBuffer.length} chars)")
+                                batchIndex++
+                                batchBuffer.clear()
+                            }
+                        }
+
+                        override fun onDone() {
+                            // Flush remaining buffered text
+                            if (batchBuffer.isNotEmpty()) {
+                                sendTokenBatch(channel, batchBuffer.toString(), batchIndex)
+                                Log.d(TAG, "send_message: final batch $batchIndex sent (${batchBuffer.length} chars)")
+                                batchIndex++
+                                batchBuffer.clear()
+                            }
+
+                            val finalText = fullText.toString()
+                            val tokenCount = finalText.length / CHARS_PER_TOKEN
+                            activeSession.recordSend()
+
+                            // Send complete event
+                            try {
+                                val completeData = JSObject()
+                                completeData.put("full_text", finalText)
+                                completeData.put("token_count", tokenCount)
+                                val completeEvent = JSObject()
+                                completeEvent.put("event", "complete")
+                                completeEvent.put("data", completeData)
+                                channel.send(completeEvent)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "send_message: failed to send complete event: ${e.message}")
+                            }
+
+                            Log.i(TAG, "send_message: complete — ${finalText.length} chars, $batchIndex batches, ~$tokenCount tokens")
+                            invoke.resolve()
+                        }
+
+                        override fun onError(throwable: Throwable) {
+                            Log.e(TAG, "send_message: streaming error — ${throwable.message}")
+
+                            // GPU failure during streaming — attempt CPU fallback and retry
+                            if (!gpuFailed && isGpuBackendFailure(throwable)) {
+                                Log.w(TAG, "send_message: GPU failure during streaming, attempting CPU fallback")
+                                try {
+                                    fallbackToCpu(activeSession.modelPath)
+                                    // Retry streaming on the new CPU conversation
+                                    val retrySession = session!!
+                                    val retryFullText = StringBuilder()
+                                    val retryBuffer = StringBuilder()
+                                    var retryBatchIndex = 0
+                                    var retryAccumulatedLength = 0
+
+                                    retrySession.conversation.sendMessageAsync(
+                                        message,
+                                        object : MessageCallback {
+                                            override fun onMessage(msg: com.google.ai.edge.litertlm.Message) {
+                                                val newText = msg?.toString() ?: ""
+                                                if (newText.isEmpty()) return
+
+                                                val delta: String
+                                                if (newText.length > retryAccumulatedLength) {
+                                                    delta = newText.substring(retryAccumulatedLength)
+                                                    retryAccumulatedLength = newText.length
+                                                } else {
+                                                    delta = newText
+                                                    retryAccumulatedLength += newText.length
+                                                }
+
+                                                retryFullText.append(delta)
+                                                retryBuffer.append(delta)
+
+                                                if (retryBuffer.length >= batchThreshold) {
+                                                    sendTokenBatch(channel, retryBuffer.toString(), retryBatchIndex)
+                                                    Log.d(TAG, "send_message: CPU retry batch $retryBatchIndex sent (${retryBuffer.length} chars)")
+                                                    retryBatchIndex++
+                                                    retryBuffer.clear()
+                                                }
+                                            }
+
+                                            override fun onDone() {
+                                                if (retryBuffer.isNotEmpty()) {
+                                                    sendTokenBatch(channel, retryBuffer.toString(), retryBatchIndex)
+                                                    retryBatchIndex++
+                                                    retryBuffer.clear()
+                                                }
+
+                                                val finalText = retryFullText.toString()
+                                                val tokenCount = finalText.length / CHARS_PER_TOKEN
+                                                retrySession.recordSend()
+
+                                                try {
+                                                    val completeData = JSObject()
+                                                    completeData.put("full_text", finalText)
+                                                    completeData.put("token_count", tokenCount)
+                                                    val completeEvent = JSObject()
+                                                    completeEvent.put("event", "complete")
+                                                    completeEvent.put("data", completeData)
+                                                    channel.send(completeEvent)
+                                                } catch (e: Exception) {
+                                                    Log.w(TAG, "send_message: failed to send CPU retry complete event: ${e.message}")
+                                                }
+
+                                                Log.i(TAG, "send_message: CPU retry complete — ${finalText.length} chars, $retryBatchIndex batches")
+                                                invoke.resolve()
+                                            }
+
+                                            override fun onError(retryError: Throwable) {
+                                                Log.e(TAG, "send_message: CPU retry also failed: ${retryError.message}")
+                                                sendErrorEvent(channel, "Inference failed even after CPU fallback: ${retryError.message}")
+                                                invoke.reject("Inference failed even after CPU fallback: ${retryError.message}", retryError)
+                                            }
+                                        },
+                                        null as? java.util.Map<String, Any>
+                                    )
+                                } catch (fallbackErr: Exception) {
+                                    Log.e(TAG, "send_message: CPU fallback failed: ${fallbackErr.message}")
+                                    sendErrorEvent(channel, "CPU fallback failed: ${fallbackErr.message}")
+                                    invoke.reject("CPU fallback failed: ${fallbackErr.message}", fallbackErr)
+                                }
+                            } else {
+                                sendErrorEvent(channel, "Streaming inference error: ${throwable.message}")
+                                invoke.reject("Streaming inference error: ${throwable.message}", throwable as? Exception)
+                            }
+                        }
+                    },
+                    null as? java.util.Map<String, Any>
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "send_message: failed to start streaming — ${e.message}")
+                sendErrorEvent(channel, "Failed to start streaming: ${e.message}")
+                invoke.reject("Failed to start streaming: ${e.message}", e)
             }
+        }
+    }
+
+    /**
+     * Send a token_batch event via the Channel.
+     */
+    private fun sendTokenBatch(channel: Channel, tokens: String, batchIndex: Int) {
+        try {
+            val data = JSObject()
+            data.put("tokens", tokens)
+            data.put("batch_index", batchIndex)
+            val event = JSObject()
+            event.put("event", "token_batch")
+            event.put("data", data)
+            channel.send(event)
+        } catch (e: Exception) {
+            Log.w(TAG, "sendTokenBatch: channel.send failed (frontend disconnected?): ${e.message}")
+        }
+    }
+
+    /**
+     * Send an error event via the Channel. Non-fatal if channel.send fails.
+     */
+    private fun sendErrorEvent(channel: Channel, errorMessage: String) {
+        try {
+            val data = JSObject()
+            data.put("message", errorMessage)
+            val event = JSObject()
+            event.put("event", "error")
+            event.put("data", data)
+            channel.send(event)
+        } catch (e: Exception) {
+            Log.w(TAG, "sendErrorEvent: channel.send failed: ${e.message}")
         }
     }
 
@@ -247,6 +450,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
     override fun onDestroy() {
         Log.i(TAG, "onDestroy: cleaning up session and engine as safety net (D007)")
+        streamingScope.cancel()
         try {
             session?.close()
         } catch (e: Exception) {
