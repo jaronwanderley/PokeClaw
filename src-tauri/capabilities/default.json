@@ -7,6 +7,10 @@
   ],
   "permissions": [
     "core:default",
-    "pokeclaw:allow-chat"
+    "pokeclaw:allow-chat",
+    "pokeclaw:allow-start-session",
+    "pokeclaw:allow-stop-session",
+    "pokeclaw:allow-send-message",
+    "pokeclaw:allow-get-session-status"
   ]
 }

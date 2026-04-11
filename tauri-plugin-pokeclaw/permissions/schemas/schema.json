@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the chat command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_session_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-session-status",
+          "markdownDescription": "Enables the get_session_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_session_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-session-status",
+          "markdownDescription": "Denies the get_session_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ping command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ping",
@@ -317,6 +329,42 @@
           "type": "string",
           "const": "deny-ping",
           "markdownDescription": "Denies the ping command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the send_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-send-message",
+          "markdownDescription": "Enables the send_message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the send_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-send-message",
+          "markdownDescription": "Denies the send_message command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-session",
+          "markdownDescription": "Enables the start_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-session",
+          "markdownDescription": "Denies the start_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-session",
+          "markdownDescription": "Enables the stop_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-session",
+          "markdownDescription": "Denies the stop_session command without any pre-configured scope."
         }
       ]
     }
