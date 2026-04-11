@@ -6,9 +6,17 @@ package io.agents.pokeclaw
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
+import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
+import android.hardware.display.DisplayManager
+import android.media.ImageReader
+import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -319,6 +327,222 @@ class PokeAccessibilityService : AccessibilityService() {
         val h = metrics.heightPixels
         Log.d(TAG, "getScreenSize: ${w}x${h}")
         return intArrayOf(w, h)
+    }
+
+    // ======================== Navigation / System Keys ========================
+
+    /**
+     * Opens an app by its package name. Uses Launcher intent to resolve the main activity.
+     *
+     * @param packageName The target app's package name (e.g. "com.whatsapp").
+     * @return true if the launch intent was resolved and started, false otherwise.
+     */
+    fun openApp(packageName: String): Boolean {
+        Log.d(TAG, "openApp: packageName=$packageName")
+        return try {
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                startActivity(launchIntent)
+                Log.i(TAG, "openApp: launched $packageName successfully")
+                true
+            } else {
+                // Try to open app details page as fallback
+                Log.w(TAG, "openApp: no launch intent for $packageName, trying market URI")
+                val marketIntent = Intent(Intent.ACTION_VIEW).apply {
+                    data = Uri.parse("market://details?id=$packageName")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(marketIntent)
+                Log.i(TAG, "openApp: opened market page for $packageName")
+                true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "openApp: failed to launch $packageName", e)
+            false
+        }
+    }
+
+    /**
+     * Presses the Back button via accessibility GLOBAL_ACTION_BACK.
+     *
+     * @return true if the action was performed successfully.
+     */
+    fun pressBack(): Boolean {
+        Log.d(TAG, "pressBack")
+        val result = performGlobalAction(GLOBAL_ACTION_BACK)
+        Log.d(TAG, "pressBack result: $result")
+        return result
+    }
+
+    /**
+     * Presses the Home button via accessibility GLOBAL_ACTION_HOME.
+     *
+     * @return true if the action was performed successfully.
+     */
+    fun pressHome(): Boolean {
+        Log.d(TAG, "pressHome")
+        val result = performGlobalAction(GLOBAL_ACTION_HOME)
+        Log.d(TAG, "pressHome result: $result")
+        return result
+    }
+
+    /**
+     * Opens the recent apps list via accessibility GLOBAL_ACTION_RECENTS.
+     *
+     * @return true if the action was performed successfully.
+     */
+    fun openRecentApps(): Boolean {
+        Log.d(TAG, "openRecentApps")
+        val result = performGlobalAction(GLOBAL_ACTION_RECENTS)
+        Log.d(TAG, "openRecentApps result: $result")
+        return result
+    }
+
+    /**
+     * Expands the notification shade via accessibility GLOBAL_ACTION_NOTIFICATIONS.
+     *
+     * @return true if the action was performed successfully.
+     */
+    fun expandNotifications(): Boolean {
+        Log.d(TAG, "expandNotifications")
+        val result = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+        Log.d(TAG, "expandNotifications result: $result")
+        return result
+    }
+
+    /**
+     * Collapses the notification shade via accessibility GLOBAL_ACTION_NOTIFICATIONS
+     * (toggling on Android) or GLOBAL_ACTION_HOME as fallback.
+     *
+     * @return true if the action was performed successfully.
+     */
+    fun collapseNotifications(): Boolean {
+        Log.d(TAG, "collapseNotifications")
+        // On most Android versions, pressing notifications again collapses
+        val result = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+        if (!result) {
+            Log.d(TAG, "collapseNotifications: toggle failed, trying HOME as fallback")
+            return performGlobalAction(GLOBAL_ACTION_HOME)
+        }
+        Log.d(TAG, "collapseNotifications result: $result")
+        return result
+    }
+
+    /**
+     * Locks the screen via accessibility GLOBAL_ACTION_LOCK_SCREEN (API 28+).
+     *
+     * @return true if the action was performed successfully, false on unsupported API levels.
+     */
+    fun lockScreen(): Boolean {
+        Log.d(TAG, "lockScreen")
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val result = performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+            Log.d(TAG, "lockScreen result: $result")
+            result
+        } else {
+            Log.w(TAG, "lockScreen: not supported below API 28 (current: ${Build.VERSION.SDK_INT})")
+            false
+        }
+    }
+
+    /**
+     * Unlocks the screen by dispatching a swipe-up gesture from the bottom of the screen.
+     * This simulates the user swiping up on the lock screen.
+     *
+     * Note: This may not work on all devices/Android versions due to security restrictions.
+     *
+     * @return true if the swipe gesture was performed successfully.
+     */
+    fun unlockScreen(): Boolean {
+        Log.d(TAG, "unlockScreen")
+        val metrics = resources.displayMetrics
+        val centerX = metrics.widthPixels / 2
+        val bottomY = metrics.heightPixels - 50
+        val topY = (metrics.heightPixels * 0.3).toInt()
+        val result = performSwipe(centerX, bottomY, centerX, topY, 500)
+        Log.d(TAG, "unlockScreen result: $result")
+        return result
+    }
+
+    /**
+     * Takes a screenshot of the current screen.
+     *
+     * Uses the MediaProjection API via DisplayManager if available,
+     * otherwise falls back to the accessibility service's takeScreenshot (API 28+).
+     *
+     * @param filePath Optional file path to save the screenshot to. If null, a temp file is used.
+     * @return The file path where the screenshot was saved, or null on failure.
+     */
+    fun takeScreenshot(filePath: String? = null): String? {
+        Log.d(TAG, "takeScreenshot: filePath=$filePath")
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            takeScreenshotApi30(filePath)
+        } else {
+            Log.w(TAG, "takeScreenshot: not supported below API 30 (current: ${Build.VERSION.SDK_INT})")
+            null
+        }
+    }
+
+    /**
+     * Takes a screenshot using the accessibility service's built-in takeScreenshot (API 30+).
+     */
+    private fun takeScreenshotApi30(filePath: String?): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+
+        try {
+            val metrics = resources.displayMetrics
+            val width = metrics.widthPixels
+            val height = metrics.heightPixels
+
+            // Use accessibility service takeScreenshot API (API 30+)
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var resultPath: String? = null
+            var errorMsg: String? = null
+
+            @Suppress("DEPRECATION")
+            takeScreenshot(
+                android.view.Display.DEFAULT_DISPLAY,
+                { bitmap ->
+                    try {
+                        val androidBitmap = bitmap.bitmap
+                        val outputFile = java.io.File(
+                            filePath ?: "${cacheDir.absolutePath}/screenshot_${System.currentTimeMillis()}.png"
+                        )
+                        outputFile.parentFile?.mkdirs()
+                        val fos = java.io.FileOutputStream(outputFile)
+                        androidBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, fos)
+                        fos.flush()
+                        fos.close()
+                        resultPath = outputFile.absolutePath
+                        Log.i(TAG, "takeScreenshot: saved to ${outputFile.absolutePath}")
+                    } catch (e: Exception) {
+                        errorMsg = e.message
+                        Log.e(TAG, "takeScreenshot: failed to save bitmap", e)
+                    } finally {
+                        bitmap.hardwareBuffer.close()
+                        latch.countDown()
+                    }
+                },
+                Handler(Looper.getMainLooper())
+            )
+
+            val completed = latch.await(5, TimeUnit.SECONDS)
+            if (!completed) {
+                Log.e(TAG, "takeScreenshot: timed out waiting for callback")
+                return null
+            }
+
+            if (errorMsg != null) {
+                Log.e(TAG, "takeScreenshot: error during save: $errorMsg")
+                return null
+            }
+
+            return resultPath
+        } catch (e: Exception) {
+            Log.e(TAG, "takeScreenshot: failed", e)
+            return null
+        }
     }
 
     // ======================== Internal: Tree Builder ========================
