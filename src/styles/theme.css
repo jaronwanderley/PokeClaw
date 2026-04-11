@@ -1,0 +1,42 @@
+/* Ember Dark Theme — extracted from prototype/dashboard-v9.html */
+:root {
+  --bg: #151211;
+  --surface: #1F1A18;
+  --user: #D45A30;
+  --utext: #FEF2ED;
+  --ai: #342C28;
+  --aib: #3D332C;
+  --ait: #E0D5CC;
+  --accent: #E8845A;
+  --t1: #E0D5CC;
+  --t2: #8A7E74;
+  --t3: #4A3F37;
+  --border: #332B27;
+  --div: #2A2220;
+  --tbg: #1A1410;
+  --tbrd: #E8845A40;
+  --tglow: #E8845A15;
+}
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+}
