@@ -160,6 +160,12 @@ class PokeAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * Returns the root node of the active window, or null.
+     * Public accessor so plugin tools can traverse the tree directly.
+     */
+    fun getRootInActiveWindow(): AccessibilityNodeInfo? = rootInActiveWindow
+
+    /**
      * Returns detailed info about a single node as a human-readable string.
      */
     fun getNodeDetail(node: AccessibilityNodeInfo?): String {

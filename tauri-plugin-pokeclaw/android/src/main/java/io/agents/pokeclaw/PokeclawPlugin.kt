@@ -9,8 +9,12 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.BatteryManager
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.StatFs
 import android.provider.Settings
 import android.util.Log
@@ -32,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @TauriPlugin
 class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
@@ -1120,6 +1125,541 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
             result.put("error", "tap_node failed: ${e.message}")
             invoke.resolve(result)
         }
+    }
+
+    /**
+     * Input text into a focused or specified editable field.
+     *
+     * Two-strategy approach: ACTION_SET_TEXT first, clipboard paste as fallback.
+     * If node_id is provided, taps that node first to focus it.
+     *
+     * Args: text (String, required), node_id (String, optional),
+     *       clear_first (Boolean, optional, default true)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun input_text(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val text = args.getString("text")
+        if (text.isNullOrBlank()) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "text is required")
+            invoke.resolve(result)
+            return
+        }
+
+        val rawNodeId = args.optString("node_id", null)
+        val clearFirst = args.optBoolean("clear_first", true)
+
+        Log.i(TAG, "input_text: text='${text.take(40)}...', node_id=$rawNodeId, clear_first=$clearFirst")
+
+        try {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "input_text: accessibility service not connected after 3000ms")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "Accessibility service not running. Enable it in Settings > Accessibility.")
+                invoke.resolve(result)
+                return
+            }
+
+            // If node_id provided, tap it to focus first
+            if (rawNodeId != null) {
+                val nodeId = rawNodeId.trim().removeSurrounding("[", "]")
+                val coords = service.getNodeCoordinates(nodeId)
+                if (coords == null) {
+                    Log.w(TAG, "input_text: node '$nodeId' not found in nodeIdMap")
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", null)
+                    result.put("error", "Node '$nodeId' not found. Call get_screen_info first to refresh node IDs.")
+                    invoke.resolve(result)
+                    return
+                }
+                Log.d(TAG, "input_text: tapping node '$nodeId' at (${coords[0]}, ${coords[1]}) to focus")
+                service.performTap(coords[0], coords[1])
+                Thread.sleep(300)
+            }
+
+            // Find focused editable node
+            val root = service.getRootInActiveWindow()
+            if (root == null) {
+                Log.w(TAG, "input_text: no active window")
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "No active window. Make sure an app is in the foreground.")
+                invoke.resolve(result)
+                return
+            }
+
+            var targetNode: AccessibilityNodeInfo? = null
+            try {
+                // Try focused input node first
+                targetNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                if (targetNode != null && !targetNode.isEditable) {
+                    targetNode.recycle()
+                    targetNode = null
+                }
+
+                // Fallback: traverse for any editable node
+                if (targetNode == null) {
+                    targetNode = findEditableNode(root)
+                }
+
+                if (targetNode == null) {
+                    Log.w(TAG, "input_text: no focused editable node found")
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", null)
+                    result.put("error", "No editable text field is focused. Tap a text field first or provide node_id.")
+                    invoke.resolve(result)
+                    return
+                }
+
+                // Strategy 1: ACTION_SET_TEXT
+                val args1 = android.os.Bundle()
+                if (clearFirst) {
+                    // Select all existing text, then set to empty
+                    val selectArgs = android.os.Bundle()
+                    selectArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                    selectArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, Int.MAX_VALUE)
+                    targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectArgs)
+
+                    args1.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                    val setSuccess = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args1)
+                    Log.i(TAG, "input_text: ACTION_SET_TEXT (clear+set) result=$setSuccess, strategy=ACTION_SET_TEXT")
+
+                    if (setSuccess) {
+                        val result = JSObject()
+                        result.put("success", true)
+                        result.put("data", "Text input via ACTION_SET_TEXT: '${text.take(30)}...'")
+                        result.put("error", null)
+                        invoke.resolve(result)
+                        return
+                    }
+                } else {
+                    // Append mode: get existing text, append new text
+                    val existingText = targetNode.text?.toString() ?: ""
+                    val newText = existingText + text
+                    args1.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
+                    val setSuccess = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args1)
+                    Log.i(TAG, "input_text: ACTION_SET_TEXT (append) result=$setSuccess, strategy=ACTION_SET_TEXT")
+
+                    if (setSuccess) {
+                        val result = JSObject()
+                        result.put("success", true)
+                        result.put("data", "Text appended via ACTION_SET_TEXT: '${text.take(30)}...'")
+                        result.put("error", null)
+                        invoke.resolve(result)
+                        return
+                    }
+                }
+
+                // Strategy 2: Clipboard paste fallback
+                Log.i(TAG, "input_text: ACTION_SET_TEXT failed, trying clipboard paste fallback")
+                val clipSuccess = setClipboard(text)
+                if (!clipSuccess) {
+                    Log.e(TAG, "input_text: failed to set clipboard")
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", null)
+                    result.put("error", "Failed to set clipboard for paste fallback")
+                    invoke.resolve(result)
+                    return
+                }
+
+                if (clearFirst) {
+                    // Clear existing text first
+                    val selectArgs = android.os.Bundle()
+                    selectArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                    selectArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, Int.MAX_VALUE)
+                    targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectArgs)
+                }
+
+                val pasteSuccess = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                Log.i(TAG, "input_text: ACTION_PASTE result=$pasteSuccess, strategy=clipboard_paste")
+
+                if (pasteSuccess) {
+                    val result = JSObject()
+                    result.put("success", true)
+                    result.put("data", "Text input via clipboard paste: '${text.take(30)}...'")
+                    result.put("error", null)
+                    invoke.resolve(result)
+                } else {
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("data", null)
+                    result.put("error", "Both ACTION_SET_TEXT and clipboard paste failed. The text field may not support text input.")
+                    invoke.resolve(result)
+                }
+
+            } finally {
+                targetNode?.recycle()
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "input_text: error — ${e.message}", e)
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "Input text failed: ${e.message}")
+            invoke.resolve(result)
+        }
+    }
+
+    /**
+     * Scroll through screens to find a node matching the given text.
+     *
+     * Uses coroutines to avoid ANR since this loops with scroll gestures.
+     * Detects scroll end by comparing the screen tree before and after each scroll.
+     *
+     * Args: text (String, required), direction (String, optional, default "down"),
+     *       max_scrolls (Int, optional, default 10, clamped 1-20)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun scroll_to_find(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val text = args.getString("text")
+        if (text.isNullOrBlank()) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "text is required")
+            invoke.resolve(result)
+            return
+        }
+
+        val direction = args.optString("direction", "down").lowercase().trim()
+        val maxScrolls = args.optInt("max_scrolls", 10).coerceIn(1, 20)
+
+        Log.i(TAG, "scroll_to_find: text='$text', direction=$direction, max_scrolls=$maxScrolls")
+
+        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+            try {
+                val result = performScrollToFind(text, direction, maxScrolls)
+                invoke.resolve(result)
+            } catch (e: Exception) {
+                Log.e(TAG, "scroll_to_find: error — ${e.message}", e)
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "scroll_to_find failed: ${e.message}")
+                invoke.resolve(result)
+            }
+        }
+    }
+
+    /**
+     * Scroll through screens to find a node matching the given text, then tap it.
+     *
+     * Uses coroutines to avoid ANR since this loops with scroll gestures.
+     * Same scroll logic as scroll_to_find, but taps the node when found.
+     *
+     * Args: text (String, required), direction (String, optional, default "down"),
+     *       max_scrolls (Int, optional, default 10, clamped 1-20)
+     * Returns: { success: Boolean, data: String?, error: String? }
+     */
+    @Command
+    fun find_and_tap(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val text = args.getString("text")
+        if (text.isNullOrBlank()) {
+            val result = JSObject()
+            result.put("success", false)
+            result.put("data", null)
+            result.put("error", "text is required")
+            invoke.resolve(result)
+            return
+        }
+
+        val direction = args.optString("direction", "down").lowercase().trim()
+        val maxScrolls = args.optInt("max_scrolls", 10).coerceIn(1, 20)
+
+        Log.i(TAG, "find_and_tap: text='$text', direction=$direction, max_scrolls=$maxScrolls")
+
+        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+            try {
+                val result = performFindAndTap(text, direction, maxScrolls)
+                invoke.resolve(result)
+            } catch (e: Exception) {
+                Log.e(TAG, "find_and_tap: error — ${e.message}", e)
+                val result = JSObject()
+                result.put("success", false)
+                result.put("data", null)
+                result.put("error", "find_and_tap failed: ${e.message}")
+                invoke.resolve(result)
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Complex gesture helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Sets the system clipboard to the given text via ClipboardManager.
+     * Must run on the main thread — uses Handler(Looper.getMainLooper()) + CountDownLatch.
+     *
+     * @return true if clipboard was set successfully, false otherwise.
+     */
+    private fun setClipboard(text: String): Boolean {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val success = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        Handler(Looper.getMainLooper()).post {
+            try {
+                val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                if (clipboard == null) {
+                    Log.e(TAG, "setClipboard: ClipboardManager not available")
+                    latch.countDown()
+                    return@post
+                }
+                val clip = ClipData.newPlainText("text", text)
+                clipboard.setPrimaryClip(clip)
+                success.set(true)
+                Log.d(TAG, "setClipboard: clipboard set successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "setClipboard: failed — ${e.message}", e)
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        return try {
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            if (!success.get()) {
+                Log.e(TAG, "setClipboard: timed out or failed")
+            }
+            success.get()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            Log.e(TAG, "setClipboard: interrupted", e)
+            false
+        }
+    }
+
+    /**
+     * Find the first editable node in the tree via BFS.
+     */
+    private fun findEditableNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isEditable) return node
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                queue.add(child)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Core scroll-to-find logic shared between scroll_to_find and find_and_tap.
+     *
+     * @param text Text to search for.
+     * @param direction "down" or "up".
+     * @param maxScrolls Maximum scroll iterations.
+     * @return JSObject with the search result.
+     */
+    private suspend fun performScrollToFind(text: String, direction: String, maxScrolls: Int): JSObject {
+        return withContext(Dispatchers.IO) {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "scroll_to_find: accessibility service not connected after 3000ms")
+                return@withContext makeErrorResult("Accessibility service not running. Enable it in Settings > Accessibility.")
+            }
+
+            // First check current screen
+            val initialNodes = service.findNodesByText(text)
+            val initialMatch = initialNodes.firstOrNull { it.isVisibleToUser }
+            if (initialMatch != null) {
+                val bounds = android.graphics.Rect()
+                initialMatch.getBoundsInScreen(bounds)
+                PokeAccessibilityService.recycleNodes(initialNodes)
+                Log.i(TAG, "scroll_to_find: found '$text' on current screen at ${bounds.toShortString()}")
+                return@withContext makeSuccessResult("Found '$text' on current screen at ${bounds.toShortString()}")
+            }
+            PokeAccessibilityService.recycleNodes(initialNodes)
+
+            // Get screen dimensions for scroll coordinates
+            val screenSize = service.getScreenSize()
+            val screenWidth = screenSize[0]
+            val screenHeight = screenSize[1]
+            val centerX = screenWidth / 2
+            val startY: Int
+            val endY: Int
+            when (direction) {
+                "up" -> {
+                    startY = screenHeight / 4
+                    endY = (screenHeight * 3) / 4
+                }
+                else -> { // "down"
+                    startY = (screenHeight * 3) / 4
+                    endY = screenHeight / 4
+                }
+            }
+
+            // Scroll loop
+            for (i in 1..maxScrolls) {
+                // Capture tree before scroll for end-detection
+                val treeBefore = service.getScreenTree() ?: ""
+
+                val swipeSuccess = service.performSwipe(centerX, startY, centerX, endY, 300)
+                if (!swipeSuccess) {
+                    Log.w(TAG, "scroll_to_find: scroll #$i swipe failed")
+                }
+                Thread.sleep(500)
+
+                // Check if tree changed (scroll-end detection)
+                val treeAfter = service.getScreenTree() ?: ""
+                if (treeBefore == treeAfter && swipeSuccess) {
+                    Log.i(TAG, "scroll_to_find: reached ${if (direction == "up") "top" else "bottom"} after $i scrolls (tree unchanged)")
+                    return@withContext makeErrorResult("Reached ${if (direction == "up") "top" else "bottom"} of scrollable content after $i scrolls. '$text' not found.")
+                }
+
+                // Search for the text after scrolling
+                val nodes = service.findNodesByText(text)
+                val match = nodes.firstOrNull { it.isVisibleToUser }
+                if (match != null) {
+                    val bounds = android.graphics.Rect()
+                    match.getBoundsInScreen(bounds)
+                    val cx = (bounds.left + bounds.right) / 2
+                    val cy = (bounds.top + bounds.bottom) / 2
+                    PokeAccessibilityService.recycleNodes(nodes)
+                    Log.i(TAG, "scroll_to_find: found '$text' after $i scrolls at ${bounds.toShortString()}")
+                    return@withContext makeSuccessResult("Found '$text' after $i scrolls at ${bounds.toShortString()}, center ($cx, $cy)")
+                }
+                PokeAccessibilityService.recycleNodes(nodes)
+
+                Log.d(TAG, "scroll_to_find: scroll #$i — '$text' not found, continuing")
+            }
+
+            Log.i(TAG, "scroll_to_find: '$text' not found after $maxScrolls scrolls")
+            makeErrorResult("'$text' not found after $maxScrolls scrolls in direction '$direction'")
+        }
+    }
+
+    /**
+     * Core find-and-tap logic: scroll to find text, then tap the node.
+     *
+     * @param text Text to search for.
+     * @param direction "down" or "up".
+     * @param maxScrolls Maximum scroll iterations.
+     * @return JSObject with the result.
+     */
+    private suspend fun performFindAndTap(text: String, direction: String, maxScrolls: Int): JSObject {
+        return withContext(Dispatchers.IO) {
+            val service = PokeAccessibilityService.getConnectedInstance(3000)
+            if (service == null) {
+                Log.w(TAG, "find_and_tap: accessibility service not connected after 3000ms")
+                return@withContext makeErrorResult("Accessibility service not running. Enable it in Settings > Accessibility.")
+            }
+
+            // First check current screen
+            val initialNodes = service.findNodesByText(text)
+            val initialMatch = initialNodes.firstOrNull { it.isVisibleToUser }
+            if (initialMatch != null) {
+                val bounds = android.graphics.Rect()
+                initialMatch.getBoundsInScreen(bounds)
+                val cx = (bounds.left + bounds.right) / 2
+                val cy = (bounds.top + bounds.bottom) / 2
+                PokeAccessibilityService.recycleNodes(initialNodes)
+                Log.i(TAG, "find_and_tap: found '$text' on current screen, tapping at ($cx, $cy)")
+                val tapSuccess = service.performTap(cx, cy)
+                return@withContext if (tapSuccess) {
+                    makeSuccessResult("Found '$text' on current screen and tapped at ($cx, $cy)")
+                } else {
+                    makeErrorResult("Found '$text' at ($cx, $cy) but tap gesture failed")
+                }
+            }
+            PokeAccessibilityService.recycleNodes(initialNodes)
+
+            // Get screen dimensions for scroll coordinates
+            val screenSize = service.getScreenSize()
+            val screenWidth = screenSize[0]
+            val screenHeight = screenSize[1]
+            val centerX = screenWidth / 2
+            val startY: Int
+            val endY: Int
+            when (direction) {
+                "up" -> {
+                    startY = screenHeight / 4
+                    endY = (screenHeight * 3) / 4
+                }
+                else -> { // "down"
+                    startY = (screenHeight * 3) / 4
+                    endY = screenHeight / 4
+                }
+            }
+
+            // Scroll loop
+            for (i in 1..maxScrolls) {
+                val treeBefore = service.getScreenTree() ?: ""
+
+                val swipeSuccess = service.performSwipe(centerX, startY, centerX, endY, 300)
+                if (!swipeSuccess) {
+                    Log.w(TAG, "find_and_tap: scroll #$i swipe failed")
+                }
+                Thread.sleep(500)
+
+                // Scroll-end detection
+                val treeAfter = service.getScreenTree() ?: ""
+                if (treeBefore == treeAfter && swipeSuccess) {
+                    Log.i(TAG, "find_and_tap: reached ${if (direction == "up") "top" else "bottom"} after $i scrolls (tree unchanged)")
+                    return@withContext makeErrorResult("Reached ${if (direction == "up") "top" else "bottom"} of scrollable content after $i scrolls. '$text' not found.")
+                }
+
+                // Search for the text after scrolling
+                val nodes = service.findNodesByText(text)
+                val match = nodes.firstOrNull { it.isVisibleToUser }
+                if (match != null) {
+                    val bounds = android.graphics.Rect()
+                    match.getBoundsInScreen(bounds)
+                    val cx = (bounds.left + bounds.right) / 2
+                    val cy = (bounds.top + bounds.bottom) / 2
+                    PokeAccessibilityService.recycleNodes(nodes)
+                    Log.i(TAG, "find_and_tap: found '$text' after $i scrolls, tapping at ($cx, $cy)")
+                    val tapSuccess = service.performTap(cx, cy)
+                    return@withContext if (tapSuccess) {
+                        makeSuccessResult("Found '$text' after $i scrolls and tapped at ($cx, $cy)")
+                    } else {
+                        makeErrorResult("Found '$text' at ($cx, $cy) after $i scrolls but tap gesture failed")
+                    }
+                }
+                PokeAccessibilityService.recycleNodes(nodes)
+
+                Log.d(TAG, "find_and_tap: scroll #$i — '$text' not found, continuing")
+            }
+
+            Log.i(TAG, "find_and_tap: '$text' not found after $maxScrolls scrolls")
+            makeErrorResult("'$text' not found after $maxScrolls scrolls in direction '$direction'")
+        }
+    }
+
+    /** Helper to build a success ToolResult JSObject. */
+    private fun makeSuccessResult(data: String): JSObject {
+        val result = JSObject()
+        result.put("success", true)
+        result.put("data", data)
+        result.put("error", null as String?)
+        return result
+    }
+
+    /** Helper to build an error ToolResult JSObject. */
+    private fun makeErrorResult(error: String): JSObject {
+        val result = JSObject()
+        result.put("success", false)
+        result.put("data", null as String?)
+        result.put("error", error)
+        return result
     }
 
     // -----------------------------------------------------------------------
