@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the chat command without any pre-configured scope."
         },
         {
+          "description": "Enables the download_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-download-model",
+          "markdownDescription": "Enables the download_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-download-model",
+          "markdownDescription": "Denies the download_model command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_session_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-session-status",
@@ -317,6 +329,18 @@
           "type": "string",
           "const": "deny-get-session-status",
           "markdownDescription": "Denies the get_session_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-models",
+          "markdownDescription": "Enables the list_models command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-models",
+          "markdownDescription": "Denies the list_models command without any pre-configured scope."
         },
         {
           "description": "Enables the ping command without any pre-configured scope.",

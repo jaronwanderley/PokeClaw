@@ -44,6 +44,43 @@ pub enum StreamEvent {
 }
 
 // ---------------------------------------------------------------------------
+// DownloadEvent — download progress IPC contract (matches Kotlin DownloadCallback)
+// ---------------------------------------------------------------------------
+
+/// Events streamed from Rust → Vue during model download.
+/// Matches the Kotlin DownloadEvent contract from T01.
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "event", content = "data")]
+pub enum DownloadEvent {
+    #[serde(rename = "progress")]
+    Progress {
+        bytes_downloaded: u64,
+        total_bytes: u64,
+        bytes_per_second: u64,
+    },
+    #[serde(rename = "complete")]
+    Complete { model_path: String, file_name: String },
+    #[serde(rename = "error")]
+    Error { message: String },
+}
+
+// ---------------------------------------------------------------------------
+// ModelInfo — static model catalog entry (matches Kotlin ModelManager.ModelInfo)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, serde::Serialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub display_name: String,
+    pub url: String,
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub min_ram_gb: u32,
+    pub is_downloaded: bool,
+    pub local_path: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // LlmSessionGuard — RAII session handle
 // ---------------------------------------------------------------------------
 
@@ -430,6 +467,113 @@ mod desktop_commands {
         log::info!("chat command received: {}", message);
         format!("Echo: {}", message)
     }
+
+    /// Desktop mock for list_models. Returns the static model catalog
+    /// matching the Kotlin ModelManager.AVAILABLE_MODELS entries.
+    /// On desktop, `is_downloaded` is always false and `local_path` is null.
+    #[tauri::command]
+    pub fn list_models() -> Vec<ModelInfo> {
+        log::info!("list_models: returning static model catalog");
+        vec![
+            ModelInfo {
+                id: "gemma4-e2b".into(),
+                display_name: "Gemma 4 E2B — 2.6GB".into(),
+                url: "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm".into(),
+                file_name: "gemma-4-E2B-it.litertlm".into(),
+                size_bytes: 2_580_000_000u64,
+                min_ram_gb: 8,
+                is_downloaded: false,
+                local_path: None,
+            },
+            ModelInfo {
+                id: "gemma4-e4b".into(),
+                display_name: "Gemma 4 E4B — 3.6GB".into(),
+                url: "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm".into(),
+                file_name: "gemma-4-E4B-it.litertlm".into(),
+                size_bytes: 3_650_000_000u64,
+                min_ram_gb: 10,
+                is_downloaded: false,
+                local_path: None,
+            },
+        ]
+    }
+
+    /// Desktop mock for download_model. Simulates a download by sending
+    /// 10–20 progress events with increasing bytes, then a complete event.
+    /// Uses the same DownloadEvent contract as the Kotlin path.
+    #[tauri::command]
+    pub async fn download_model(
+        model_id: String,
+        on_progress: tauri::ipc::Channel<DownloadEvent>,
+    ) -> Result<(), String> {
+        log::info!("download_model (desktop mock): model_id={}", model_id);
+
+        let model = match model_id.as_str() {
+            "gemma4-e2b" => (
+                "gemma-4-E2B-it.litertlm".to_string(),
+                2_580_000_000u64,
+            ),
+            "gemma4-e4b" => (
+                "gemma-4-E4B-it.litertlm".to_string(),
+                3_650_000_000u64,
+            ),
+            _ => {
+                let msg = format!("Unknown model_id: {}", model_id);
+                log::error!("download_model: {}", msg);
+                let _ = on_progress.send(DownloadEvent::Error {
+                    message: msg.clone(),
+                });
+                return Err(msg);
+            }
+        };
+        let (file_name, total_bytes) = model;
+
+        let steps = 15u64;
+        let step_bytes = total_bytes / steps;
+
+        for i in 1..=steps {
+            let bytes_downloaded = if i == steps {
+                total_bytes // exact total on last step
+            } else {
+                step_bytes * i
+            };
+            // Simulate ~500KB/s–5MB/s download speed
+            let speed = 500_000u64 + (i * 300_000);
+
+            if let Err(e) = on_progress.send(DownloadEvent::Progress {
+                bytes_downloaded,
+                total_bytes,
+                bytes_per_second: speed,
+            }) {
+                log::warn!(
+                    "download_model: channel send failed at step {}/{} — frontend may have disconnected: {}",
+                    i, steps, e
+                );
+                return Ok(()); // Non-fatal: frontend disconnected
+            }
+
+            // Simulate network delay between progress events (~200ms)
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+
+        let model_path = format!("/tmp/models/{}", file_name);
+        log::info!(
+            "download_model (desktop mock): download complete — model_path={}",
+            model_path
+        );
+
+        if let Err(e) = on_progress.send(DownloadEvent::Complete {
+            model_path: model_path.clone(),
+            file_name: file_name.clone(),
+        }) {
+            log::warn!(
+                "download_model: channel send failed for complete event — frontend may have disconnected: {}",
+                e
+            );
+        }
+
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +605,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::get_session_status,
             desktop_commands::ping,
             desktop_commands::chat,
+            desktop_commands::list_models,
+            desktop_commands::download_model,
         ]);
 
     builder.build()

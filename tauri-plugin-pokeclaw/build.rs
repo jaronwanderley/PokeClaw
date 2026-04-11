@@ -5,6 +5,8 @@ const COMMANDS: &[&str] = &[
     "stop_session",
     "send_message",
     "get_session_status",
+    "list_models",
+    "download_model",
 ];
 
 fn main() {

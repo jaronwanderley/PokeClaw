@@ -36,6 +36,32 @@ Denies the chat command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-download-model`
+
+</td>
+<td>
+
+Enables the download_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-download-model`
+
+</td>
+<td>
+
+Denies the download_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-get-session-status`
 
 </td>
@@ -55,6 +81,32 @@ Enables the get_session_status command without any pre-configured scope.
 <td>
 
 Denies the get_session_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-list-models`
+
+</td>
+<td>
+
+Enables the list_models command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-list-models`
+
+</td>
+<td>
+
+Denies the list_models command without any pre-configured scope.
 
 </td>
 </tr>

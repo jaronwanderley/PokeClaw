@@ -11,6 +11,9 @@
     "pokeclaw:allow-start-session",
     "pokeclaw:allow-stop-session",
     "pokeclaw:allow-send-message",
-    "pokeclaw:allow-get-session-status"
+    "pokeclaw:allow-get-session-status",
+    "pokeclaw:allow-list-models",
+    "pokeclaw:allow-download-model",
+    "dialog:default"
   ]
 }
