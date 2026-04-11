@@ -4,17 +4,23 @@ import { useChat } from './composables/useChat'
 import ChatMessage from './components/ChatMessage.vue'
 import MessageInput from './components/MessageInput.vue'
 
-const { messages, sendMessage } = useChat()
+const { messages, streamingText, isStreaming, sendMessage } = useChat()
 const chatRef = ref<HTMLElement | null>(null)
 
+function scrollToBottom() {
+  nextTick(() => {
+    chatRef.value?.scrollTo({ top: chatRef.value.scrollHeight, behavior: 'smooth' })
+  })
+}
+
+// Auto-scroll on new messages
 watch(
   () => messages.value.length,
-  () => {
-    nextTick(() => {
-      chatRef.value?.scrollTo({ top: chatRef.value.scrollHeight, behavior: 'smooth' })
-    })
-  },
+  scrollToBottom,
 )
+
+// Auto-scroll as streaming tokens arrive
+watch(streamingText, scrollToBottom)
 </script>
 
 <template>
@@ -35,9 +41,23 @@ watch(
     </div>
     <div class="chat" ref="chatRef">
       <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
+      <!-- Streaming message bubble -->
+      <div v-if="isStreaming && streamingText" class="msg msg-a streaming-msg">
+        <span class="msg-avatar">🤖</span>
+        <div class="msg-bubble">
+          {{ streamingText }}<span class="cursor"></span>
+        </div>
+      </div>
+      <!-- Typing indicator when streaming starts but no tokens yet -->
+      <div v-else-if="isStreaming" class="msg msg-a streaming-msg">
+        <span class="msg-avatar">🤖</span>
+        <div class="msg-bubble typing-dots">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
     </div>
     <div class="ia">
-      <MessageInput @send="sendMessage" />
+      <MessageInput :disabled="isStreaming" @send="sendMessage" />
     </div>
   </div>
 </template>
@@ -107,5 +127,72 @@ watch(
   flex-shrink: 0;
   background: var(--surface);
   border-top: 1px solid var(--div);
+}
+
+/* Streaming message */
+.streaming-msg .msg-avatar {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.streaming-msg .msg-bubble {
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  background: var(--ai);
+  color: var(--ait);
+  border: 1px solid var(--aib);
+  border-bottom-left-radius: 4px;
+}
+
+/* Blinking cursor */
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background: var(--ait);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Typing dots indicator */
+.typing-dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 12px 16px !important;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--t3);
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
 }
 </style>
