@@ -13,6 +13,9 @@ use std::sync::Arc;
 use crate::agent::config::AgentConfig;
 use crate::agent::llm_provider::{ChatMessage, LlmProvider, OpenAiProvider};
 use crate::agent::loop_runner::{run_agent_loop, EventEmitter};
+use crate::agent::pipeline::{PipelineRouter, Route};
+use crate::agent::skill::executor::SkillExecutor;
+use crate::agent::skill::registry::SkillRegistry;
 use crate::agent::task_event::TaskEvent;
 use crate::agent::tool_executor::{
     AgentRoundResult, DesktopToolExecutor, TokenUsage, ToolCallResult, ToolExecutor,
@@ -44,6 +47,56 @@ impl EventEmitter for ChannelEventEmitter {
     fn emit(&self, event: TaskEvent) -> bool {
         self.channel.send(event).is_ok()
     }
+}
+
+// ---------------------------------------------------------------------------
+// ChannelEventEmitterWrapper — wraps a consumed ChannelEventEmitter
+// ---------------------------------------------------------------------------
+
+/// Wraps a ChannelEventEmitter that has already been partially consumed
+/// (e.g., for skill progress events) so it can be passed to run_agent_loop
+/// after a skill failure fallback. Implements EventEmitter by delegating
+/// to the inner ChannelEventEmitter.
+struct ChannelEventEmitterWrapper {
+    inner: ChannelEventEmitter,
+}
+
+impl EventEmitter for ChannelEventEmitterWrapper {
+    fn emit(&self, event: TaskEvent) -> bool {
+        self.inner.emit(event)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Date helpers — used by persistence inline in DirectTool/Skill paths
+// ---------------------------------------------------------------------------
+
+/// Convert days since Unix epoch to (year, month, day).
+fn days_to_ymd_local(mut days: u64) -> (u64, u64, u64) {
+    let mut year = 1970u64;
+    loop {
+        let days_in_year = if is_leap_year_local(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+    let leap = is_leap_year_local(year);
+    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 0u64;
+    for &md in &month_days {
+        month += 1;
+        if days < md {
+            break;
+        }
+        days -= md;
+    }
+    (year, month, days + 1)
+}
+
+fn is_leap_year_local(year: u64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 // ---------------------------------------------------------------------------
@@ -271,40 +324,293 @@ pub async fn start_task(
     cancel_flag.store(false, Ordering::SeqCst);
     task_running.store(true, Ordering::SeqCst);
 
-    info!("start_task: spawning agent loop task");
+    // ── Route through 3-tier pipeline ─────────────────────────────
+    let skill_registry = SkillRegistry::with_builtins();
+    let route = PipelineRouter::route(&task, &skill_registry);
+    info!("start_task: routed to {:?}", route);
 
-    // ── Spawn the agent loop ──────────────────────────────────────
-    tokio::spawn(async move {
-        let provider = OpenAiProvider::new(api_key, model_name.clone());
-        let executor = DesktopToolExecutor::new();
-        let registry = ToolRegistry::default();
-        let config = AgentConfig::default();
-        let emitter = ChannelEventEmitter::new(on_event);
+    match route {
+        // ══════════════════════════════════════════════════════════
+        // Tier 1: DirectTool — synchronous, no LLM call
+        // ══════════════════════════════════════════════════════════
+        Route::DirectTool {
+            tool_name,
+            params,
+            description,
+        } => {
+            info!(
+                "start_task: DirectTool executing '{}' — {}",
+                tool_name, description
+            );
 
-        let result = run_agent_loop(
-            task,
-            Box::new(provider),
-            Box::new(executor),
-            registry,
-            Box::new(emitter),
-            cancel_flag,
-            config,
-            Some(db_arc),
-            task_db_id,
-        )
-        .await;
+            let executor = DesktopToolExecutor::new();
+            let emitter = ChannelEventEmitter::new(on_event);
 
-        if let Err(ref e) = result {
-            error!("start_task: agent loop failed — {}", e);
-        } else {
-            info!("start_task: agent loop completed successfully");
+            // Emit events for frontend visibility
+            emitter.emit(TaskEvent::LoopStart { round: 1 });
+            emitter.emit(TaskEvent::ToolAction {
+                tool_name: tool_name.clone(),
+            });
+
+            let params_value =
+                serde_json::Value::Object(params.into_iter().collect());
+            let result = executor.execute(&tool_name, params_value);
+
+            let detail = if result.success {
+                result
+                    .data
+                    .as_ref()
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "Success".to_string())
+            } else {
+                result
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            };
+
+            emitter.emit(TaskEvent::ToolResult {
+                tool_name: tool_name.clone(),
+                success: result.success,
+                detail: detail.clone(),
+            });
+
+            let answer = if result.success {
+                format!("{}: {}", description, detail)
+            } else {
+                format!("{} failed: {}", description, detail)
+            };
+
+            info!("start_task: DirectTool completed — success={}", result.success);
+            emitter.emit(TaskEvent::Completed {
+                answer: answer.clone(),
+                model_name: "direct".to_string(),
+            });
+
+            // Persist completion
+            if let Some(tid) = task_db_id {
+                if let Ok(db_guard) = db_arc.lock() {
+                    let completed_at = {
+                        let now = std::time::SystemTime::now();
+                        let d = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                        let secs = d.as_secs();
+                        let tod = secs % 86400;
+                        let h = tod / 3600;
+                        let m = (tod % 3600) / 60;
+                        let s = tod % 60;
+                        let days = secs / 86400;
+                        let (y, mo, dy) = days_to_ymd_local(days);
+                        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", y, mo, dy, h, m, s)
+                    };
+                    if let Err(e) = db_guard.update_task_status(
+                        tid,
+                        if result.success { "completed" } else { "failed" },
+                        Some(&answer),
+                        if result.success { None } else { Some(&detail) },
+                        1,
+                        0,
+                        0.0,
+                        1,
+                        Some(&completed_at),
+                    ) {
+                        error!("start_task: failed to persist DirectTool result: {}", e);
+                    }
+                }
+            }
+
+            // Persist tool event
+            if let Some(tid) = task_db_id {
+                if let Ok(db_guard) = db_arc.lock() {
+                    if let Err(e) = db_guard.insert_task_event(
+                        tid,
+                        "toolResult",
+                        Some(&serde_json::json!({
+                            "tool_name": tool_name,
+                            "success": result.success,
+                            "detail": detail,
+                            "route": "DirectTool"
+                        }).to_string()),
+                    ) {
+                        error!("start_task: failed to persist tool event: {}", e);
+                    }
+                }
+            }
+
+            // Clear running flag
+            task_running.store(false, Ordering::SeqCst);
+            Ok(())
         }
 
-        // ── Clear running flag in finally-equivalent block ────────
-        task_running.store(false, Ordering::SeqCst);
-    });
+        // ══════════════════════════════════════════════════════════
+        // Tier 1.5: Skill — sequential step execution, may fall back to agent loop
+        // ══════════════════════════════════════════════════════════
+        Route::Skill {
+            skill_id,
+            description,
+        } => {
+            info!(
+                "start_task: Skill '{}' matched — {}",
+                skill_id, description
+            );
 
-    Ok(())
+            let skill = skill_registry
+                .find_by_id(&skill_id)
+                .expect("skill matched by router but not found in registry")
+                .clone();
+
+            let skill_task_id = skill_id.clone();
+            let _skill_description = description.clone();
+
+            tokio::spawn(async move {
+                let executor = DesktopToolExecutor::new();
+                let emitter = ChannelEventEmitter::new(on_event);
+
+                // Emit LoopStart for frontend visibility
+                emitter.emit(TaskEvent::LoopStart { round: 1 });
+
+                info!("start_task: executing skill '{}' with {} steps", skill.id, skill.steps.len());
+
+                // Emit progress for each step
+                for (i, step) in skill.steps.iter().enumerate() {
+                    emitter.emit(TaskEvent::Progress {
+                        step: (i + 1) as u32,
+                        description: step.description.clone(),
+                    });
+                }
+
+                let result = SkillExecutor::execute_skill(&skill, &executor, &cancel_flag);
+
+                match result {
+                    crate::agent::skill::executor::SkillResult::Completed { answer } => {
+                        info!("start_task: skill '{}' completed successfully", skill_task_id);
+                        emitter.emit(TaskEvent::Completed {
+                            answer: answer.clone(),
+                            model_name: "skill".to_string(),
+                        });
+
+                        // Persist completion
+                        if let (Some(tid), Some(ref db)) = (task_db_id, Some(&db_arc)) {
+                            if let Ok(db_guard) = db.lock() {
+                                let completed_at = {
+                                    let now = std::time::SystemTime::now();
+                                    let d = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                                    let secs = d.as_secs();
+                                    let tod = secs % 86400;
+                                    let h = tod / 3600;
+                                    let m = (tod % 3600) / 60;
+                                    let s = tod % 60;
+                                    let days = secs / 86400;
+                                    let (y, mo, dy) = days_to_ymd_local(days);
+                                    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", y, mo, dy, h, m, s)
+                                };
+                                if let Err(e) = db_guard.update_task_status(
+                                    tid,
+                                    "completed",
+                                    Some(&answer),
+                                    None,
+                                    1,
+                                    0,
+                                    0.0,
+                                    skill.steps.len() as i64,
+                                    Some(&completed_at),
+                                ) {
+                                    error!("start_task: failed to persist skill completion: {}", e);
+                                }
+                            }
+                        }
+
+                        task_running.store(false, Ordering::SeqCst);
+                    }
+                    crate::agent::skill::executor::SkillResult::Failed {
+                        error: skill_error,
+                        fallback_goal,
+                    } => {
+                        warn!(
+                            "start_task: skill '{}' failed: '{}', falling back to agent loop with task='{}'",
+                            skill_task_id, skill_error, fallback_goal
+                        );
+
+                        emitter.emit(TaskEvent::Progress {
+                            step: 0,
+                            description: format!(
+                                "Skill '{}' failed, switching to agent loop: {}",
+                                skill_task_id, skill_error
+                            ),
+                        });
+
+                        // Fall through to full agent loop with fallback_goal
+                        let provider = OpenAiProvider::new(api_key, model_name.clone());
+                        let agent_executor = DesktopToolExecutor::new();
+                        let registry = ToolRegistry::default();
+                        let config = AgentConfig::default();
+                        let agent_emitter = ChannelEventEmitterWrapper { inner: emitter };
+
+                        let agent_result = run_agent_loop(
+                            fallback_goal,
+                            Box::new(provider),
+                            Box::new(agent_executor),
+                            registry,
+                            Box::new(agent_emitter),
+                            cancel_flag,
+                            config,
+                            Some(db_arc),
+                            task_db_id,
+                        )
+                        .await;
+
+                        if let Err(ref e) = agent_result {
+                            error!("start_task: agent loop fallback failed — {}", e);
+                        } else {
+                            info!("start_task: agent loop fallback completed successfully");
+                        }
+
+                        task_running.store(false, Ordering::SeqCst);
+                    }
+                }
+            });
+
+            Ok(())
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // Tier 3: AgentLoop — existing behavior
+        // ══════════════════════════════════════════════════════════
+        Route::AgentLoop { task: agent_task } => {
+            info!("start_task: AgentLoop — spawning full agent loop");
+
+            tokio::spawn(async move {
+                let provider = OpenAiProvider::new(api_key, model_name.clone());
+                let executor = DesktopToolExecutor::new();
+                let registry = ToolRegistry::default();
+                let config = AgentConfig::default();
+                let emitter = ChannelEventEmitter::new(on_event);
+
+                let result = run_agent_loop(
+                    agent_task,
+                    Box::new(provider),
+                    Box::new(executor),
+                    registry,
+                    Box::new(emitter),
+                    cancel_flag,
+                    config,
+                    Some(db_arc),
+                    task_db_id,
+                )
+                .await;
+
+                if let Err(ref e) = result {
+                    error!("start_task: agent loop failed — {}", e);
+                } else {
+                    info!("start_task: agent loop completed successfully");
+                }
+
+                // ── Clear running flag in finally-equivalent block ────────
+                task_running.store(false, Ordering::SeqCst);
+            });
+
+            Ok(())
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
