@@ -24,6 +24,12 @@ pub enum ChatMessage {
     System(String),
     User(String),
     Assistant(String),
+    /// Assistant message that includes tool calls — critical for multi-round
+    /// history so the LLM knows what tools it previously invoked.
+    AssistantWithTools {
+        text: Option<String>,
+        tool_calls: Vec<ToolCall>,
+    },
     ToolResult {
         tool_call_id: String,
         content: String,
@@ -139,6 +145,7 @@ impl OpenAiProvider {
 
 /// Convert our ChatMessage into async-openai request messages.
 fn convert_messages(messages: &[ChatMessage]) -> Vec<ChatCompletionRequestMessage> {
+
     messages
         .iter()
         .map(|msg| match msg {
@@ -164,6 +171,34 @@ fn convert_messages(messages: &[ChatMessage]) -> Vec<ChatCompletionRequestMessag
                         .content(text.clone())
                         .build()
                         .expect("assistant message build should not fail"),
+                )
+            }
+            ChatMessage::AssistantWithTools { text, tool_calls } => {
+                let api_tool_calls: Vec<_> = tool_calls
+                    .iter()
+                    .map(|tc| {
+                        async_openai::types::chat::ChatCompletionMessageToolCalls::Function(
+                            async_openai::types::chat::ChatCompletionMessageToolCall {
+                                id: tc.id.clone(),
+                                function: async_openai::types::chat::FunctionCall {
+                                    name: tc.name.clone(),
+                                    arguments: tc.arguments.clone(),
+                                },
+                            },
+                        )
+                    })
+                    .collect();
+
+                let mut args = ChatCompletionRequestAssistantMessageArgs::default();
+                if let Some(ref t) = text {
+                    args.content(t.clone());
+                }
+                if !api_tool_calls.is_empty() {
+                    args.tool_calls(api_tool_calls);
+                }
+                ChatCompletionRequestMessage::Assistant(
+                    args.build()
+                        .expect("assistant-with-tools message build should not fail"),
                 )
             }
             ChatMessage::ToolResult {
@@ -461,6 +496,101 @@ mod tests {
             },
             _ => panic!("Expected Assistant message"),
         }
+    }
+
+    #[test]
+    fn test_convert_assistant_with_tools_message() {
+        let messages = vec![ChatMessage::AssistantWithTools {
+            text: Some("Let me tap that.".to_string()),
+            tool_calls: vec![ToolCall {
+                id: "call_1".to_string(),
+                name: "tap".to_string(),
+                arguments: r#"{"x":100,"y":200}"#.to_string(),
+            }],
+        }];
+        let api_msgs = convert_messages(&messages);
+        assert_eq!(api_msgs.len(), 1);
+        match &api_msgs[0] {
+            ChatCompletionRequestMessage::Assistant(m) => {
+                // Verify content is set
+                assert!(m.content.is_some());
+                // Verify tool_calls are set
+                assert!(m.tool_calls.is_some());
+                let tc = m.tool_calls.as_ref().unwrap();
+                assert_eq!(tc.len(), 1);
+            },
+            _ => panic!("Expected Assistant message"),
+        }
+    }
+
+    #[test]
+    fn test_convert_assistant_with_tools_no_text() {
+        let messages = vec![ChatMessage::AssistantWithTools {
+            text: None,
+            tool_calls: vec![ToolCall {
+                id: "call_2".to_string(),
+                name: "finish".to_string(),
+                arguments: r#"{"result":"done"}"#.to_string(),
+            }],
+        }];
+        let api_msgs = convert_messages(&messages);
+        assert_eq!(api_msgs.len(), 1);
+        match &api_msgs[0] {
+            ChatCompletionRequestMessage::Assistant(m) => {
+                assert!(m.tool_calls.is_some());
+            },
+            _ => panic!("Expected Assistant message"),
+        }
+    }
+
+    #[test]
+    fn test_convert_assistant_with_tools_multiple_calls() {
+        let messages = vec![ChatMessage::AssistantWithTools {
+            text: Some("I'll do both.".to_string()),
+            tool_calls: vec![
+                ToolCall {
+                    id: "call_a".to_string(),
+                    name: "tap".to_string(),
+                    arguments: r#"{"x":100,"y":200}"#.to_string(),
+                },
+                ToolCall {
+                    id: "call_b".to_string(),
+                    name: "input_text".to_string(),
+                    arguments: r#"{"text":"hello"}"#.to_string(),
+                },
+            ],
+        }];
+        let api_msgs = convert_messages(&messages);
+        match &api_msgs[0] {
+            ChatCompletionRequestMessage::Assistant(m) => {
+                let tc = m.tool_calls.as_ref().unwrap();
+                assert_eq!(tc.len(), 2);
+            },
+            _ => panic!("Expected Assistant message"),
+        }
+    }
+
+    #[test]
+    fn test_convert_full_conversation_with_assistant_with_tools() {
+        // Simulate a full multi-round conversation
+        let messages = vec![
+            ChatMessage::System("You are helpful.".to_string()),
+            ChatMessage::User("Tap the button".to_string()),
+            ChatMessage::AssistantWithTools {
+                text: Some("I'll tap it.".to_string()),
+                tool_calls: vec![ToolCall {
+                    id: "call_1".to_string(),
+                    name: "tap".to_string(),
+                    arguments: r#"{"x":100,"y":200}"#.to_string(),
+                }],
+            },
+            ChatMessage::ToolResult {
+                tool_call_id: "call_1".to_string(),
+                content: r#"{"success":true}"#.to_string(),
+            },
+        ];
+        let api_msgs = convert_messages(&messages);
+        assert_eq!(api_msgs.len(), 4);
     }
 
     #[test]
