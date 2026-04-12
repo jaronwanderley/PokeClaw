@@ -4,3 +4,8 @@
 pub mod tool_registry;
 pub mod llm_provider;
 pub mod tool_executor;
+pub mod model_pricing;
+pub mod token_monitor;
+pub mod budget;
+pub mod stuck_detector;
+pub mod context;
