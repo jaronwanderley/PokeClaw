@@ -11,7 +11,7 @@ use tauri::State;
 use std::sync::Arc;
 
 use crate::agent::config::AgentConfig;
-use crate::agent::llm_provider::{ChatMessage, LlmProvider, OpenAiProvider};
+use crate::agent::llm::{ChatMessage, LlmProvider, OpenAiProvider};
 use crate::agent::loop_runner::{run_agent_loop, EventEmitter};
 use crate::agent::pipeline::{PipelineRouter, Route};
 use crate::agent::skill::executor::SkillExecutor;

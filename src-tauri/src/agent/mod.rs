@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0.
 
 pub mod tool_registry;
-pub mod llm_provider;
+pub mod llm;
 pub mod tool_executor;
 pub mod model_pricing;
 pub mod token_monitor;

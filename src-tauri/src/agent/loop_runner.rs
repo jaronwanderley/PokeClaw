@@ -17,7 +17,7 @@ use log::{info, warn, error};
 
 use crate::agent::budget::{self, TaskBudget};
 use crate::agent::config::AgentConfig;
-use crate::agent::llm_provider::{ChatMessage, LlmProvider};
+use crate::agent::llm::{ChatMessage, LlmProvider};
 use crate::agent::stuck_detector::{RecoveryLevel, StuckDetector};
 use crate::agent::task_event::TaskEvent;
 use crate::agent::token_monitor::TokenMonitor;
@@ -621,7 +621,7 @@ pub async fn run_agent_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::llm_provider::{LlmError, LlmResponse, TokenUsage, ToolCall};
+    use crate::agent::llm::{LlmError, LlmResponse, TokenUsage, ToolCall};
     use crate::agent::task_event::TaskEvent;
     use async_trait::async_trait;
     use std::sync::Mutex;
