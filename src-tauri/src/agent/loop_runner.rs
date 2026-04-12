@@ -17,6 +17,7 @@ use log::{info, warn, error};
 
 use crate::agent::budget::{self, TaskBudget};
 use crate::agent::config::AgentConfig;
+use crate::agent::guards::GuardRegistry;
 use crate::agent::llm::{ChatMessage, LlmProvider};
 use crate::agent::stuck_detector::{RecoveryLevel, StuckDetector};
 use crate::agent::task_event::TaskEvent;
@@ -261,6 +262,7 @@ pub async fn run_agent_loop(
     config: AgentConfig,
     db: Option<Arc<std::sync::Mutex<Database>>>,
     task_db_id: Option<i64>,
+    guards: Option<GuardRegistry>,
 ) -> Result<(), String> {
     info!(
         "run_agent_loop: starting task '{}' with model '{}', max_iterations={}",
@@ -282,9 +284,24 @@ pub async fn run_agent_loop(
 
     info!("run_agent_loop: {} tools available", tool_schemas.len());
 
+    // Build guard prompt sections (if guards are active)
+    let mut guard_prompt_suffix = String::new();
+    let mut guards = guards; // make mutable for recording
+    if let Some(ref g) = guards {
+        guard_prompt_suffix = g.build_prompt_sections();
+        if !guard_prompt_suffix.is_empty() {
+            info!("run_agent_loop: guard prompt sections added ({} chars)", guard_prompt_suffix.len());
+        }
+    }
+
     // Initialize message history
+    let mut system_text = config.system_prompt.clone();
+    if !guard_prompt_suffix.is_empty() {
+        system_text.push_str("\n\n");
+        system_text.push_str(&guard_prompt_suffix);
+    }
     let mut messages: Vec<ChatMessage> = vec![
-        ChatMessage::System(config.system_prompt.clone()),
+        ChatMessage::System(system_text),
         ChatMessage::User(task.clone()),
     ];
 
@@ -417,8 +434,30 @@ pub async fn run_agent_loop(
             }
         }
 
-        // ── i. No tool calls → task complete ──────────────────────
+        // ── i. No tool calls → check guards, then task complete ────
         if response.tool_calls.is_empty() {
+            // Guard: check if text-only completion should be blocked
+            let blocked = if let Some(ref g) = guards {
+                if g.should_block_text_only_completion() {
+                    let correction = g.build_completion_correction();
+                    warn!(
+                        "run_agent_loop: guard blocking text-only completion at round {} — {}",
+                        round, correction
+                    );
+                    messages.push(ChatMessage::User(correction));
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if blocked {
+                // Continue loop — the correction message will prompt the LLM to use tools
+                continue;
+            }
+
             let answer = response.text.unwrap_or_else(|| "Task completed.".to_string());
             info!("run_agent_loop: completed at round {} (no tool calls)", round);
             emitter.emit(TaskEvent::Completed {
@@ -441,6 +480,7 @@ pub async fn run_agent_loop(
         }
 
         // ── j. Execute tool calls ─────────────────────────────────
+        let mut guard_blocked_finish = false;
         for tool_call in &response.tool_calls {
             emitter.emit(TaskEvent::ToolAction {
                 tool_name: tool_call.name.clone(),
@@ -495,6 +535,18 @@ pub async fn run_agent_loop(
                 }).to_string());
             }
 
+            // Guard: record successful tool execution
+            if result.success {
+                let parsed_params: serde_json::Value = if tool_call.arguments.is_empty() {
+                    serde_json::Value::Object(serde_json::Map::new())
+                } else {
+                    serde_json::from_str(&tool_call.arguments).unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+                };
+                if let Some(ref mut g) = guards {
+                    g.record_successful_tool(&tool_call.name, &parsed_params);
+                }
+            }
+
             // Extract finish answer before consuming result.data
             let finish_answer = if tool_call.name == "finish" {
                 result.data.as_ref().and_then(|d| {
@@ -521,8 +573,25 @@ pub async fn run_agent_loop(
                 content: tool_result_content,
             });
 
-            // ── k. Finish tool detection ───────────────────────────
+            // ── k. Finish tool detection with guard check ────────
             if tool_call.name == "finish" {
+                // Guard: check if finish should be blocked
+                if let Some(ref g) = guards {
+                    if let Some(block_reason) = g.maybe_block_finish(None) {
+                        warn!("run_agent_loop: guard blocking finish at round {} — {}", round, block_reason);
+                        // Replace the finish tool result with a user message telling the agent to continue
+                        messages.push(ChatMessage::User(format!(
+                            "Do not call finish yet. {}",
+                            block_reason
+                        )));
+                        guard_blocked_finish = true;
+                    }
+                }
+
+                if guard_blocked_finish {
+                    break; // Break out of tool call loop, continue outer round loop
+                }
+
                 let answer = finish_answer.unwrap_or_else(|| "Task completed.".to_string());
                 info!("run_agent_loop: finish tool called at round {}", round);
                 emitter.emit(TaskEvent::Completed {
@@ -755,6 +824,7 @@ mod tests {
             test_config(),
             None,
             None,
+            None,
         )
         .await;
 
@@ -807,6 +877,7 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
             None,
             None,
         )
@@ -862,6 +933,7 @@ mod tests {
             test_config(),
             None,
             None,
+            None,
         )
         .await;
 
@@ -908,6 +980,7 @@ mod tests {
             test_config(),
             None,
             None,
+            None,
         )
         .await;
 
@@ -941,6 +1014,7 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
             None,
             None,
         )
@@ -993,6 +1067,7 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             config,
+            None,
             None,
             None,
         )
@@ -1070,6 +1145,7 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
             None,
             None,
         )
@@ -1180,6 +1256,7 @@ mod tests {
             test_config(),
             None,
             None,
+            None,
         )
         .await;
 
@@ -1248,6 +1325,7 @@ mod tests {
             test_config(),
             None,
             None,
+            None,
         )
         .await;
 
@@ -1300,6 +1378,7 @@ mod tests {
             test_config(),
             None,
             None,
+            None,
         )
         .await;
 
@@ -1345,6 +1424,7 @@ mod tests {
             Box::new(emitter.clone()),
             cancel,
             test_config(),
+            None,
             None,
             None,
         )

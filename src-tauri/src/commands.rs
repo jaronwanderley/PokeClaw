@@ -11,7 +11,10 @@ use tauri::State;
 use std::sync::Arc;
 
 use crate::agent::config::AgentConfig;
+use crate::agent::guards::GuardRegistry;
 use crate::agent::llm::{ChatMessage, LlmProvider, OpenAiProvider};
+use crate::agent::llm::anthropic::AnthropicProvider;
+use crate::agent::llm::local::LocalProvider;
 use crate::agent::loop_runner::{run_agent_loop, EventEmitter};
 use crate::agent::pipeline::{PipelineRouter, Route};
 use crate::agent::skill::executor::SkillExecutor;
@@ -25,6 +28,7 @@ use crate::db::chat::ChatMessageRecord;
 use crate::db::tasks::{TaskEventRecord, TaskRecord};
 use crate::db::Database;
 use crate::AgentState;
+use crate::LlmProviderType;
 
 // ---------------------------------------------------------------------------
 // ChannelEventEmitter — adapts tauri::ipc::Channel to EventEmitter trait
@@ -262,6 +266,36 @@ pub fn set_openai_api_key(state: State<'_, AgentState>, key: String) -> Result<(
 }
 
 // ---------------------------------------------------------------------------
+// set_anthropic_api_key command
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn set_anthropic_api_key(state: State<'_, AgentState>, key: String) -> Result<(), String> {
+    info!("set_anthropic_api_key: setting API key (length={})", key.len());
+    let mut guard = state.anthropic_api_key.lock().map_err(|e| e.to_string())?;
+    *guard = Some(key);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// set_llm_provider_type command
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn set_llm_provider_type(state: State<'_, AgentState>, provider_type: String) -> Result<(), String> {
+    let ptype = match provider_type.to_lowercase().as_str() {
+        "openai" => LlmProviderType::OpenAi,
+        "anthropic" => LlmProviderType::Anthropic,
+        "local" => LlmProviderType::Local,
+        _ => return Err(format!("Unknown provider type: '{}'. Use 'openai', 'anthropic', or 'local'.", provider_type)),
+    };
+    info!("set_llm_provider_type: switching to {:?}", ptype);
+    let mut guard = state.llm_provider_type.lock().map_err(|e| e.to_string())?;
+    *guard = ptype;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // start_task command — spawns the agent loop in a background tokio task
 // ---------------------------------------------------------------------------
 
@@ -287,20 +321,48 @@ pub async fn start_task(
         return Err("Task text must not be empty.".to_string());
     }
 
-    // ── Validate API key ──────────────────────────────────────────
-    let api_key = {
-        let guard = state.openai_api_key.lock().map_err(|e| e.to_string())?;
-        match guard.clone() {
-            Some(k) if !k.trim().is_empty() => k,
-            _ => {
-                warn!("start_task: rejected — OpenAI API key not set");
-                return Err("OpenAI API key not set. Use set_openai_api_key first.".to_string());
-            }
+    // ── Validate API key & determine provider ─────────────────────
+    let provider_type = {
+        let guard = state.llm_provider_type.lock().map_err(|e| e.to_string())?;
+        guard.clone()
+    };
+
+    let (api_key, model_name) = match provider_type {
+        LlmProviderType::OpenAi => {
+            let key = {
+                let guard = state.openai_api_key.lock().map_err(|e| e.to_string())?;
+                match guard.clone() {
+                    Some(k) if !k.trim().is_empty() => k,
+                    _ => {
+                        warn!("start_task: rejected — OpenAI API key not set");
+                        return Err("OpenAI API key not set. Use set_openai_api_key first.".to_string());
+                    }
+                }
+            };
+            (Some(key), "gpt-4o".to_string())
+        }
+        LlmProviderType::Anthropic => {
+            let key = {
+                let guard = state.anthropic_api_key.lock().map_err(|e| e.to_string())?;
+                match guard.clone() {
+                    Some(k) if !k.trim().is_empty() => k,
+                    _ => {
+                        warn!("start_task: rejected — Anthropic API key not set");
+                        return Err("Anthropic API key not set. Use set_anthropic_api_key first.".to_string());
+                    }
+                }
+            };
+            (Some(key), "claude-sonnet-4-20250514".to_string())
+        }
+        LlmProviderType::Local => {
+            info!("start_task: using local LLM provider (desktop mock)");
+            (None, "local-gemma4".to_string())
         }
     };
 
+    info!("start_task: provider={:?}, model={}", provider_type, model_name);
+
     // ── Insert task record for persistence ─────────────────────────
-    let model_name = "gpt-4o".to_string();
     let task_db_id = {
         let db = state.db.lock().map_err(|e| format!("DB lock error: {}", e))?;
         match db.insert_task(&task, &model_name) {
@@ -539,7 +601,19 @@ pub async fn start_task(
                         });
 
                         // Fall through to full agent loop with fallback_goal
-                        let provider = OpenAiProvider::new(api_key, model_name.clone());
+                        let provider: Box<dyn LlmProvider> = match provider_type {
+                            LlmProviderType::OpenAi => {
+                                let key = api_key.as_ref().expect("OpenAI key validated above");
+                                Box::new(OpenAiProvider::new(key.clone(), model_name.clone()))
+                            }
+                            LlmProviderType::Anthropic => {
+                                let key = api_key.as_ref().expect("Anthropic key validated above");
+                                Box::new(AnthropicProvider::new(key.clone(), model_name.clone()))
+                            }
+                            LlmProviderType::Local => {
+                                Box::new(LocalProvider::new_mock())
+                            }
+                        };
                         let agent_executor = DesktopToolExecutor::new();
                         let registry = ToolRegistry::default();
                         let config = AgentConfig::default();
@@ -547,7 +621,7 @@ pub async fn start_task(
 
                         let agent_result = run_agent_loop(
                             fallback_goal,
-                            Box::new(provider),
+                            provider,
                             Box::new(agent_executor),
                             registry,
                             Box::new(agent_emitter),
@@ -555,6 +629,7 @@ pub async fn start_task(
                             config,
                             Some(db_arc),
                             task_db_id,
+                            None, // guards not active for skill fallback
                         )
                         .await;
 
@@ -578,16 +653,37 @@ pub async fn start_task(
         Route::AgentLoop { task: agent_task } => {
             info!("start_task: AgentLoop — spawning full agent loop");
 
+            let provider: Box<dyn LlmProvider> = match provider_type {
+                LlmProviderType::OpenAi => {
+                    let key = api_key.as_ref().expect("OpenAI key validated above");
+                    Box::new(OpenAiProvider::new(key.clone(), model_name.clone()))
+                }
+                LlmProviderType::Anthropic => {
+                    let key = api_key.as_ref().expect("Anthropic key validated above");
+                    Box::new(AnthropicProvider::new(key.clone(), model_name.clone()))
+                }
+                LlmProviderType::Local => {
+                    Box::new(LocalProvider::new_mock())
+                }
+            };
+
             tokio::spawn(async move {
-                let provider = OpenAiProvider::new(api_key, model_name.clone());
                 let executor = DesktopToolExecutor::new();
                 let registry = ToolRegistry::default();
                 let config = AgentConfig::default();
                 let emitter = ChannelEventEmitter::new(on_event);
 
+                // Create guard registry for this task
+                let guards = Some(GuardRegistry::from_task(&agent_task));
+                if let Some(ref g) = guards {
+                    if g.has_active_guards() {
+                        info!("start_task: AgentLoop — guards activated for task");
+                    }
+                }
+
                 let result = run_agent_loop(
                     agent_task,
-                    Box::new(provider),
+                    provider,
                     Box::new(executor),
                     registry,
                     Box::new(emitter),
@@ -595,6 +691,7 @@ pub async fn start_task(
                     config,
                     Some(db_arc),
                     task_db_id,
+                    guards,
                 )
                 .await;
 
