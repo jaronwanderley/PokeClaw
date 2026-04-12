@@ -3,19 +3,23 @@ import { ref, watch, nextTick } from 'vue'
 import { useChat } from './composables/useChat'
 import { useModel } from './composables/useModel'
 import { useAccessibility } from './composables/useAccessibility'
+import { useTask } from './composables/useTask'
 import ChatMessage from './components/ChatMessage.vue'
 import MessageInput from './components/MessageInput.vue'
 import ModelPicker from './components/ModelPicker.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import PermissionPanel from './components/PermissionPanel.vue'
+import TaskPanel from './components/TaskPanel.vue'
 
 const { messages, streamingText, isStreaming, sessionStatus, sendMessage, setSessionStatus } = useChat()
 const { preferGpu } = useModel()
 const { screenTree, isLoading: isScreenLoading, error: screenError, fetchScreenInfo } = useAccessibility()
+const { startTask, taskStatus } = useTask()
 const chatRef = ref<HTMLElement | null>(null)
 const showSettings = ref(false)
 const showDebug = ref(false)
 const showPermissions = ref(false)
+const showTaskPanel = ref(false)
 
 function scrollToBottom() {
   nextTick(() => {
@@ -38,6 +42,11 @@ function handleSessionStarted() {
 
 function handleSettingsClose() {
   showSettings.value = false
+}
+
+function handleStartTask(text: string) {
+  showTaskPanel.value = true
+  startTask(text)
 }
 </script>
 
@@ -95,7 +104,7 @@ function handleSettingsClose() {
         </div>
       </div>
       <div class="ia">
-        <MessageInput :disabled="isStreaming" @send="sendMessage" />
+        <MessageInput :disabled="isStreaming || taskStatus === 'running'" @send="sendMessage" @start-task="handleStartTask" />
       </div>
     </template>
 
@@ -123,6 +132,9 @@ function handleSettingsClose() {
 
     <!-- Permission panel -->
     <PermissionPanel :visible="showPermissions" @close="showPermissions = false" />
+
+    <!-- Task panel -->
+    <TaskPanel :visible="showTaskPanel" @close="showTaskPanel = false" />
   </div>
 </template>
 
