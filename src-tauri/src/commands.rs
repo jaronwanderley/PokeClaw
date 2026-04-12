@@ -17,6 +17,8 @@ use crate::agent::tool_executor::{
     AgentRoundResult, DesktopToolExecutor, TokenUsage, ToolCallResult, ToolExecutor,
 };
 use crate::agent::tool_registry::ToolRegistry;
+use crate::db::chat::ChatMessageRecord;
+use crate::db::Database;
 use crate::AgentState;
 
 // ---------------------------------------------------------------------------
@@ -304,4 +306,42 @@ pub fn cancel_task(state: State<'_, AgentState>) -> Result<(), String> {
     info!("cancel_task: cancel flag set");
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Chat persistence commands
+// ---------------------------------------------------------------------------
+
+/// Persist a chat message to the database. Returns the inserted row ID.
+#[tauri::command]
+pub fn save_chat_message(
+    db: State<'_, std::sync::Mutex<Database>>,
+    session_id: String,
+    role: String,
+    content: String,
+    metadata: Option<String>,
+) -> Result<i64, String> {
+    info!(
+        "save_chat_message: session_id='{}', role='{}', content_len={}",
+        session_id,
+        role,
+        content.len()
+    );
+    let db = db.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let id = db.insert_chat_message(&session_id, &role, &content, metadata.as_deref())?;
+    info!("save_chat_message: inserted row id={}", id);
+    Ok(id)
+}
+
+/// Load all chat messages for a session, ordered by created_at ascending.
+#[tauri::command]
+pub fn load_chat_history(
+    db: State<'_, std::sync::Mutex<Database>>,
+    session_id: String,
+) -> Result<Vec<ChatMessageRecord>, String> {
+    info!("load_chat_history: session_id='{}'", session_id);
+    let db = db.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let messages = db.list_chat_messages(&session_id)?;
+    info!("load_chat_history: returning {} messages", messages.len());
+    Ok(messages)
 }

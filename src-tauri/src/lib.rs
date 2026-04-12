@@ -64,6 +64,8 @@ pub fn run() {
             commands::set_openai_api_key,
             commands::start_task,
             commands::cancel_task,
+            commands::save_chat_message,
+            commands::load_chat_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

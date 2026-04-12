@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { invoke, Channel } from '@tauri-apps/api/core'
+import { saveChatMessage, loadChatHistory, getSessionId } from './usePersistence'
 
 export interface Message {
   id: number
@@ -18,8 +19,35 @@ const isStreaming = ref(false)
 const sessionStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
 let nextId = 1
+let chatInitialized = false
 
 export function useChat() {
+  /**
+   * Load chat history from the database on first init.
+   * Maps ChatMessageRecord[] to Message[] and populates the messages ref.
+   * Safe to call multiple times — only loads once.
+   */
+  async function initChat(): Promise<void> {
+    if (chatInitialized) return
+    chatInitialized = true
+    try {
+      const sessionId = getSessionId()
+      const records = await loadChatHistory(sessionId)
+      if (records.length > 0) {
+        messages.value = records.map((r) => ({
+          id: nextId++,
+          role: r.role === 'user' ? 'user' as const : 'ai' as const,
+          text: r.content,
+        }))
+        console.log(`[useChat] Loaded ${records.length} messages from DB for session ${sessionId}`)
+      }
+    } catch (err) {
+      console.error('[useChat] Failed to load chat history:', err)
+    }
+  }
+
+  // Auto-initialize on first useChat() call
+  initChat()
   /**
    * Fetch the current session status from the backend and update the ref.
    * Rust returns SessionStatus serde enum; Kotlin returns { state, ... }.
@@ -44,6 +72,7 @@ export function useChat() {
   }
 
   async function sendStreamingMessage(text: string) {
+    const sessionId = getSessionId()
     const onEvent = new Channel<StreamEvent>()
 
     onEvent.onmessage = (event: StreamEvent) => {
@@ -59,6 +88,10 @@ export function useChat() {
           })
           streamingText.value = ''
           isStreaming.value = false
+          // Persist AI response to database
+          saveChatMessage(sessionId, 'ai', event.data.full_text).catch((err) => {
+            console.error('[useChat] Failed to persist AI message:', err)
+          })
           break
         case 'error':
           messages.value.push({
@@ -106,8 +139,15 @@ export function useChat() {
     })
     isStreaming.value = true
     streamingText.value = ''
+
+    // Persist user message to database
+    const sessionId = getSessionId()
+    saveChatMessage(sessionId, 'user', trimmed).catch((err) => {
+      console.error('[useChat] Failed to persist user message:', err)
+    })
+
     sendStreamingMessage(trimmed)
   }
 
-  return { messages, streamingText, isStreaming, sessionStatus, sendMessage, updateSessionStatus, setSessionStatus }
+  return { messages, streamingText, isStreaming, sessionStatus, sendMessage, updateSessionStatus, setSessionStatus, initChat }
 }
