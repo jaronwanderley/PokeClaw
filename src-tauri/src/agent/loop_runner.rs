@@ -351,10 +351,9 @@ pub async fn run_agent_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::llm_provider::{LlmError, LlmResponse, TokenUsage};
+    use crate::agent::llm_provider::{LlmError, LlmResponse, TokenUsage, ToolCall};
     use crate::agent::task_event::TaskEvent;
     use async_trait::async_trait;
-    use serde_json::json;
     use std::sync::Mutex;
 
     // ── Collecting emitter for tests ───────────────────────────────
@@ -379,6 +378,13 @@ mod tests {
         fn emit(&self, event: TaskEvent) -> bool {
             self.events.lock().unwrap().push(event);
             true
+        }
+    }
+
+    /// Blanket impl so tests can use `Arc<VecEmitter>` → `Box<dyn EventEmitter>`.
+    impl<T: EventEmitter + ?Sized> EventEmitter for std::sync::Arc<T> {
+        fn emit(&self, event: TaskEvent) -> bool {
+            (**self).emit(event)
         }
     }
 
@@ -663,7 +669,9 @@ mod tests {
         assert!(result.is_err());
 
         let events = emitter.events();
-        assert!(matches!(&events[0], TaskEvent::Failed { ref error } if error.contains("Authentication failed")));
+        assert!(events.len() >= 2, "Expected at least 2 events (LoopStart + Failed), got {}", events.len());
+        assert!(matches!(&events[0], TaskEvent::LoopStart { .. }));
+        assert!(matches!(&events[1], TaskEvent::Failed { ref error } if error.contains("Authentication failed")));
     }
 
     // ── Test: max iterations exhausted ─────────────────────────────
