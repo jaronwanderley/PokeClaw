@@ -2,6 +2,24 @@ import { ref, readonly } from 'vue'
 import { invoke, Channel } from '@tauri-apps/api/core'
 
 /**
+ * Task record returned from the database.
+ */
+export interface TaskRecord {
+  id: number
+  task_text: string
+  status: string
+  model_name: string
+  answer: string | null
+  error: string | null
+  iteration_count: number
+  total_tokens: number
+  total_cost_usd: number
+  tool_count: number
+  created_at: string
+  completed_at: string | null
+}
+
+/**
  * Discriminated union matching the Rust TaskEvent serde output.
  * Rust uses #[serde(tag = "event", content = "data", rename_all = "camelCase")].
  */
@@ -30,6 +48,7 @@ const lastAnswer = ref<string | null>(null)
 const taskError = ref<string | null>(null)
 const events = ref<TaskEventPayload[]>([])
 const modelName = ref<string | null>(null)
+const taskHistory = ref<TaskRecord[]>([])
 
 // ── Composable ────────────────────────────────────────────────────────
 
@@ -147,6 +166,23 @@ export function useTask() {
     modelName.value = null
   }
 
+  /**
+   * Load task history from the database. Populates the taskHistory ref
+   * and returns the records.
+   */
+  async function loadTaskHistory(limit?: number): Promise<TaskRecord[]> {
+    try {
+      const records = await invoke<TaskRecord[]>('load_task_history', {
+        limit: limit ?? 20,
+      })
+      taskHistory.value = records
+      return records
+    } catch (err) {
+      console.error('[useTask] loadTaskHistory failed:', err)
+      return []
+    }
+  }
+
   return {
     taskStatus: readonly(taskStatus),
     iterationCount: readonly(iterationCount),
@@ -158,8 +194,10 @@ export function useTask() {
     taskError: readonly(taskError),
     events: readonly(events),
     modelName: readonly(modelName),
+    taskHistory: readonly(taskHistory),
     startTask,
     cancelTask,
     resetTask,
+    loadTaskHistory,
   }
 }

@@ -23,6 +23,7 @@ use crate::agent::task_event::TaskEvent;
 use crate::agent::token_monitor::TokenMonitor;
 use crate::agent::tool_executor::ToolExecutor;
 use crate::agent::tool_registry::ToolRegistry;
+use crate::db::Database;
 
 // ---------------------------------------------------------------------------
 // EventEmitter trait — abstracts event delivery for testability
@@ -33,6 +34,206 @@ use crate::agent::tool_registry::ToolRegistry;
 pub trait EventEmitter: Send + Sync {
     /// Emit an event. Returns false if the receiver is gone (e.g. channel closed).
     fn emit(&self, event: TaskEvent) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// Persistence helpers — non-fatal DB operations for the agent loop
+// ---------------------------------------------------------------------------
+
+/// Persist a task event. Logs errors but never fails the agent loop.
+fn persist_task_event(db_arc: &Arc<std::sync::Mutex<Database>>, task_id: i64, event_type: &str, event_data: &str) {
+    match db_arc.lock() {
+        Ok(db) => {
+            if let Err(e) = db.insert_task_event(task_id, event_type, Some(event_data)) {
+                error!("persist_task_event: task_id={}, type={}: {}", task_id, event_type, e);
+            } else {
+                info!("persist_task_event: task_id={}, type={}", task_id, event_type);
+            }
+        }
+        Err(e) => {
+            error!("persist_task_event: DB lock error for task_id={}: {}", task_id, e);
+        }
+    }
+}
+
+/// Persist a completed task with answer, tokens, cost, and tool count.
+/// Also updates cumulative session totals in agent_state.
+fn persist_task_completed(
+    db_arc: &Arc<std::sync::Mutex<Database>>,
+    task_id: i64,
+    round: u32,
+    answer: &str,
+    total_tokens: i64,
+    total_cost_usd: f64,
+    tool_count: i64,
+) {
+    match db_arc.lock() {
+        Ok(db) => {
+            let completed_at = chrono_now_rfc3339();
+            if let Err(e) = db.update_task_status(
+                task_id,
+                "completed",
+                Some(answer),
+                None,
+                round as i64,
+                total_tokens,
+                total_cost_usd,
+                tool_count,
+                Some(&completed_at),
+            ) {
+                error!("persist_task_completed: task_id={}: {}", task_id, e);
+            } else {
+                info!(
+                    "persist_task_completed: task_id={}, tokens={}, cost={:.4}, tools={}",
+                    task_id, total_tokens, total_cost_usd, tool_count
+                );
+            }
+
+            // Update cumulative session totals
+            update_session_totals(&db, total_tokens, total_cost_usd);
+        }
+        Err(e) => {
+            error!("persist_task_completed: DB lock error for task_id={}: {}", task_id, e);
+        }
+    }
+}
+
+/// Persist a failed task with error info.
+fn persist_task_failed(
+    db_arc: &Arc<std::sync::Mutex<Database>>,
+    task_id: i64,
+    round: u32,
+    error_msg: &str,
+    token_monitor: &TokenMonitor,
+) {
+    match db_arc.lock() {
+        Ok(db) => {
+            let status = token_monitor.get_status();
+            let completed_at = chrono_now_rfc3339();
+            if let Err(e) = db.update_task_status(
+                task_id,
+                "failed",
+                None,
+                Some(error_msg),
+                round as i64,
+                status.total_tokens as i64,
+                status.estimated_cost_usd,
+                0, // tool_count not tracked accurately on failure path
+                Some(&completed_at),
+            ) {
+                error!("persist_task_failed: task_id={}: {}", task_id, e);
+            } else {
+                info!("persist_task_failed: task_id={}, error='{}'", task_id, error_msg);
+            }
+
+            // Update cumulative session totals even on failure
+            update_session_totals(&db, status.total_tokens as i64, status.estimated_cost_usd);
+        }
+        Err(e) => {
+            error!("persist_task_failed: DB lock error for task_id={}: {}", task_id, e);
+        }
+    }
+}
+
+/// Persist a cancelled task.
+fn persist_task_cancelled(db_arc: &Arc<std::sync::Mutex<Database>>, task_id: i64) {
+    match db_arc.lock() {
+        Ok(db) => {
+            let completed_at = chrono_now_rfc3339();
+            if let Err(e) = db.update_task_status(
+                task_id,
+                "cancelled",
+                None,
+                None,
+                0,
+                0,
+                0.0,
+                0,
+                Some(&completed_at),
+            ) {
+                error!("persist_task_cancelled: task_id={}: {}", task_id, e);
+            } else {
+                info!("persist_task_cancelled: task_id={}", task_id);
+            }
+        }
+        Err(e) => {
+            error!("persist_task_cancelled: DB lock error for task_id={}: {}", task_id, e);
+        }
+    }
+}
+
+/// Update cumulative session token/cost totals in agent_state.
+fn update_session_totals(db: &Database, new_tokens: i64, new_cost: f64) {
+    // Accumulate tokens
+    let current_tokens: i64 = db
+        .get_state("session_total_tokens")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    if let Err(e) = db.set_state("session_total_tokens", &(current_tokens + new_tokens).to_string()) {
+        error!("update_session_totals: failed to update session_total_tokens: {}", e);
+    }
+
+    // Accumulate cost
+    let current_cost: f64 = db
+        .get_state("session_total_cost")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    if let Err(e) = db.set_state("session_total_cost", &(current_cost + new_cost).to_string()) {
+        error!("update_session_totals: failed to update session_total_cost: {}", e);
+    }
+}
+
+/// Returns current datetime in RFC 3339 / ISO 8601 format.
+fn chrono_now_rfc3339() -> String {
+    // Use std::time for simplicity — format as ISO 8601 without chrono dependency
+    // SQLite's datetime('now') format: YYYY-MM-DD HH:MM:SS
+    let now = std::time::SystemTime::now();
+    let duration = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let secs = duration.as_secs();
+    // Calculate date components
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+    let seconds = time_of_day % 60;
+    // Calculate year/month/day from days since epoch (simplified algorithm)
+    let (year, month, day) = days_to_ymd(days);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        year, month, day, hours, minutes, seconds
+    )
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
+    let mut year = 1970u64;
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+    let leap = is_leap_year(year);
+    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 0u64;
+    for &md in &month_days {
+        month += 1;
+        if days < md {
+            break;
+        }
+        days -= md;
+    }
+    (year, month, days + 1)
+}
+
+fn is_leap_year(year: u64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +259,8 @@ pub async fn run_agent_loop(
     emitter: Box<dyn EventEmitter>,
     cancel: Arc<AtomicBool>,
     config: AgentConfig,
+    db: Option<Arc<std::sync::Mutex<Database>>>,
+    task_db_id: Option<i64>,
 ) -> Result<(), String> {
     info!(
         "run_agent_loop: starting task '{}' with model '{}', max_iterations={}",
@@ -93,6 +296,7 @@ pub async fn run_agent_loop(
         config.max_cost_usd,
         config.soft_limit_percent,
     );
+    let mut total_tool_count: i64 = 0;
 
     // Main ReAct loop
     for round in 1..=config.max_iterations {
@@ -100,6 +304,9 @@ pub async fn run_agent_loop(
         if cancel.load(Ordering::Relaxed) {
             info!("run_agent_loop: cancelled at round {}", round);
             emitter.emit(TaskEvent::Cancelled);
+            if let (Some(ref db), Some(tid)) = (&db, task_db_id) {
+                persist_task_cancelled(db, tid);
+            }
             return Ok(());
         }
 
@@ -121,6 +328,9 @@ pub async fn run_agent_loop(
                 emitter.emit(TaskEvent::Failed {
                     error: error_msg.clone(),
                 });
+                if let (Some(ref db), Some(tid)) = (&db, task_db_id) {
+                    persist_task_failed(db, tid, round, &error_msg, &token_monitor);
+                }
                 return Err(error_msg);
             }
         };
@@ -155,9 +365,20 @@ pub async fn run_agent_loop(
                 );
                 warn!("run_agent_loop: {}", msg);
                 emitter.emit(TaskEvent::Completed {
-                    answer: msg,
+                    answer: msg.clone(),
                     model_name: config.model_name.clone(),
                 });
+                if let (Some(ref db_arc), Some(tid)) = (&db, task_db_id) {
+                    persist_task_completed(
+                        db_arc,
+                        tid,
+                        round,
+                        &msg,
+                        token_status.total_tokens as i64,
+                        token_status.estimated_cost_usd,
+                        total_tool_count,
+                    );
+                }
                 return Ok(());
             }
             budget::Status::SoftLimit => {
@@ -204,6 +425,18 @@ pub async fn run_agent_loop(
                 answer: answer.clone(),
                 model_name: config.model_name.clone(),
             });
+            if let (Some(ref db_arc), Some(tid)) = (&db, task_db_id) {
+                let status = token_monitor.get_status();
+                persist_task_completed(
+                    db_arc,
+                    tid,
+                    round,
+                    &answer,
+                    status.total_tokens as i64,
+                    status.estimated_cost_usd,
+                    total_tool_count,
+                );
+            }
             return Ok(());
         }
 
@@ -252,6 +485,16 @@ pub async fn run_agent_loop(
                 detail: detail.clone(),
             });
 
+            // Persist tool result event to DB
+            total_tool_count += 1;
+            if let (Some(ref db_arc), Some(tid)) = (&db, task_db_id) {
+                persist_task_event(db_arc, tid, "toolResult", &serde_json::json!({
+                    "tool_name": tool_call.name,
+                    "success": result.success,
+                    "detail": detail,
+                }).to_string());
+            }
+
             // Extract finish answer before consuming result.data
             let finish_answer = if tool_call.name == "finish" {
                 result.data.as_ref().and_then(|d| {
@@ -283,9 +526,21 @@ pub async fn run_agent_loop(
                 let answer = finish_answer.unwrap_or_else(|| "Task completed.".to_string());
                 info!("run_agent_loop: finish tool called at round {}", round);
                 emitter.emit(TaskEvent::Completed {
-                    answer,
+                    answer: answer.clone(),
                     model_name: config.model_name.clone(),
                 });
+                if let (Some(ref db_arc), Some(tid)) = (&db, task_db_id) {
+                    let status = token_monitor.get_status();
+                    persist_task_completed(
+                        db_arc,
+                        tid,
+                        round,
+                        &answer,
+                        status.total_tokens as i64,
+                        status.estimated_cost_usd,
+                        total_tool_count,
+                    );
+                }
                 return Ok(());
             }
         }
@@ -313,9 +568,21 @@ pub async fn run_agent_loop(
                     );
                     warn!("run_agent_loop: {}", msg);
                     emitter.emit(TaskEvent::Completed {
-                        answer: msg,
+                        answer: msg.clone(),
                         model_name: config.model_name.clone(),
                     });
+                    if let (Some(ref db_arc), Some(tid)) = (&db, task_db_id) {
+                        let status = token_monitor.get_status();
+                        persist_task_completed(
+                            db_arc,
+                            tid,
+                            round,
+                            &msg,
+                            status.total_tokens as i64,
+                            status.estimated_cost_usd,
+                            total_tool_count,
+                        );
+                    }
                     return Ok(());
                 }
                 RecoveryLevel::Hint | RecoveryLevel::StrategySwitch => {
@@ -341,6 +608,9 @@ pub async fn run_agent_loop(
     emitter.emit(TaskEvent::Failed {
         error: msg.clone(),
     });
+    if let (Some(ref db_arc), Some(tid)) = (&db, task_db_id) {
+        persist_task_failed(db_arc, tid, config.max_iterations, &msg, &token_monitor);
+    }
     Err(msg)
 }
 
@@ -483,6 +753,8 @@ mod tests {
             Box::new(emitter),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -535,6 +807,8 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -586,6 +860,8 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -630,6 +906,8 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -663,6 +941,8 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -713,6 +993,8 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             config,
+            None,
+            None,
         )
         .await;
 
@@ -788,6 +1070,8 @@ mod tests {
             Box::new(emitter_clone),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -894,6 +1178,8 @@ mod tests {
             Box::new(emitter.clone()),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -960,6 +1246,8 @@ mod tests {
             Box::new(emitter.clone()),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -1010,6 +1298,8 @@ mod tests {
             Box::new(emitter.clone()),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 
@@ -1055,6 +1345,8 @@ mod tests {
             Box::new(emitter.clone()),
             cancel,
             test_config(),
+            None,
+            None,
         )
         .await;
 

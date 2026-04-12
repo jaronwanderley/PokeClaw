@@ -15,16 +15,8 @@ pub struct AgentState {
     pub running_task_cancel: Arc<AtomicBool>,
     /// Quick check whether a task is currently active.
     pub task_running: Arc<AtomicBool>,
-}
-
-impl Default for AgentState {
-    fn default() -> Self {
-        Self {
-            openai_api_key: Mutex::new(None),
-            running_task_cancel: Arc::new(AtomicBool::new(false)),
-            task_running: Arc::new(AtomicBool::new(false)),
-        }
-    }
+    /// Shared database handle for task/chat persistence.
+    pub db: Arc<Mutex<db::Database>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,10 +24,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_pokeclaw::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(AgentState::default())
         .setup(|app| {
             // Initialize SQLite database
-            {
+            let db_arc = {
                 let app_data_dir = app
                     .path()
                     .app_data_dir()
@@ -47,8 +38,20 @@ pub fn run() {
                 db.run_migrations()
                     .expect("Failed to run database migrations");
                 log::info!("Database initialized at {:?}", db_path);
-                app.manage(std::sync::Mutex::new(db));
-            }
+                Arc::new(Mutex::new(db))
+            };
+
+            // Create AgentState with the real DB handle
+            let agent_state = AgentState {
+                openai_api_key: Mutex::new(None),
+                running_task_cancel: Arc::new(AtomicBool::new(false)),
+                task_running: Arc::new(AtomicBool::new(false)),
+                db: db_arc.clone(),
+            };
+
+            // Manage both AgentState and the standalone DB Arc (for chat commands)
+            app.manage(agent_state);
+            app.manage(db_arc);
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -66,6 +69,8 @@ pub fn run() {
             commands::cancel_task,
             commands::save_chat_message,
             commands::load_chat_history,
+            commands::load_task_history,
+            commands::load_task_events,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

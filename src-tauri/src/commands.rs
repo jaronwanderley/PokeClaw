@@ -8,6 +8,7 @@ use log::{error, info, warn};
 use serde::Deserialize;
 use tauri::ipc::Channel;
 use tauri::State;
+use std::sync::Arc;
 
 use crate::agent::config::AgentConfig;
 use crate::agent::llm_provider::{ChatMessage, LlmProvider, OpenAiProvider};
@@ -18,6 +19,7 @@ use crate::agent::tool_executor::{
 };
 use crate::agent::tool_registry::ToolRegistry;
 use crate::db::chat::ChatMessageRecord;
+use crate::db::tasks::{TaskEventRecord, TaskRecord};
 use crate::db::Database;
 use crate::AgentState;
 
@@ -244,9 +246,26 @@ pub async fn start_task(
         }
     };
 
+    // ── Insert task record for persistence ─────────────────────────
+    let model_name = "gpt-4o".to_string();
+    let task_db_id = {
+        let db = state.db.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        match db.insert_task(&task, &model_name) {
+            Ok(id) => {
+                info!("start_task: inserted task record id={}", id);
+                Some(id)
+            }
+            Err(e) => {
+                error!("start_task: failed to insert task record: {}", e);
+                None
+            }
+        }
+    };
+
     // ── Clone shared state Arcs for the spawned task ──────────────
     let cancel_flag = state.running_task_cancel.clone();
     let task_running = state.task_running.clone();
+    let db_arc = state.db.clone();
 
     // ── Reset cancel flag and mark running ────────────────────────
     cancel_flag.store(false, Ordering::SeqCst);
@@ -256,7 +275,7 @@ pub async fn start_task(
 
     // ── Spawn the agent loop ──────────────────────────────────────
     tokio::spawn(async move {
-        let provider = OpenAiProvider::new(api_key, "gpt-4o".to_string());
+        let provider = OpenAiProvider::new(api_key, model_name.clone());
         let executor = DesktopToolExecutor::new();
         let registry = ToolRegistry::default();
         let config = AgentConfig::default();
@@ -270,6 +289,8 @@ pub async fn start_task(
             Box::new(emitter),
             cancel_flag,
             config,
+            Some(db_arc),
+            task_db_id,
         )
         .await;
 
@@ -315,7 +336,7 @@ pub fn cancel_task(state: State<'_, AgentState>) -> Result<(), String> {
 /// Persist a chat message to the database. Returns the inserted row ID.
 #[tauri::command]
 pub fn save_chat_message(
-    db: State<'_, std::sync::Mutex<Database>>,
+    db: State<'_, Arc<std::sync::Mutex<Database>>>,
     session_id: String,
     role: String,
     content: String,
@@ -336,7 +357,7 @@ pub fn save_chat_message(
 /// Load all chat messages for a session, ordered by created_at ascending.
 #[tauri::command]
 pub fn load_chat_history(
-    db: State<'_, std::sync::Mutex<Database>>,
+    db: State<'_, Arc<std::sync::Mutex<Database>>>,
     session_id: String,
 ) -> Result<Vec<ChatMessageRecord>, String> {
     info!("load_chat_history: session_id='{}'", session_id);
@@ -344,4 +365,35 @@ pub fn load_chat_history(
     let messages = db.list_chat_messages(&session_id)?;
     info!("load_chat_history: returning {} messages", messages.len());
     Ok(messages)
+}
+
+// ---------------------------------------------------------------------------
+// Task history persistence commands
+// ---------------------------------------------------------------------------
+
+/// Load recent task records, ordered by created_at descending.
+#[tauri::command]
+pub fn load_task_history(
+    state: State<'_, AgentState>,
+    limit: Option<u32>,
+) -> Result<Vec<TaskRecord>, String> {
+    let limit = limit.unwrap_or(50);
+    info!("load_task_history: limit={}", limit);
+    let db = state.db.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let tasks = db.list_tasks(limit as i64)?;
+    info!("load_task_history: returning {} tasks", tasks.len());
+    Ok(tasks)
+}
+
+/// Load all events for a specific task, ordered by created_at ascending.
+#[tauri::command]
+pub fn load_task_events(
+    state: State<'_, AgentState>,
+    task_id: i64,
+) -> Result<Vec<TaskEventRecord>, String> {
+    info!("load_task_events: task_id={}", task_id);
+    let db = state.db.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let events = db.list_task_events(task_id)?;
+    info!("load_task_events: returning {} events for task_id={}", events.len(), task_id);
+    Ok(events)
 }
