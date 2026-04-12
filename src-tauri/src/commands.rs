@@ -1,18 +1,46 @@
 // Copyright 2026 PokeClaw (agents.io). All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use log::{info, warn, error};
+use log::{error, info, warn};
 use serde::Deserialize;
+use tauri::ipc::Channel;
 use tauri::State;
 
+use crate::agent::config::AgentConfig;
 use crate::agent::llm_provider::{ChatMessage, LlmProvider, OpenAiProvider};
+use crate::agent::loop_runner::{run_agent_loop, EventEmitter};
+use crate::agent::task_event::TaskEvent;
 use crate::agent::tool_executor::{
     AgentRoundResult, DesktopToolExecutor, TokenUsage, ToolCallResult, ToolExecutor,
 };
 use crate::agent::tool_registry::ToolRegistry;
 use crate::AgentState;
+
+// ---------------------------------------------------------------------------
+// ChannelEventEmitter — adapts tauri::ipc::Channel to EventEmitter trait
+// ---------------------------------------------------------------------------
+
+/// Wraps a Tauri IPC Channel to implement the EventEmitter trait used by
+/// run_agent_loop. This bridges the agent loop's testable event interface
+/// with Tauri's streaming Channel primitive.
+struct ChannelEventEmitter {
+    channel: Channel<TaskEvent>,
+}
+
+impl ChannelEventEmitter {
+    fn new(channel: Channel<TaskEvent>) -> Self {
+        Self { channel }
+    }
+}
+
+impl EventEmitter for ChannelEventEmitter {
+    fn emit(&self, event: TaskEvent) -> bool {
+        self.channel.send(event).is_ok()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // test_agent_round command
@@ -173,5 +201,107 @@ pub fn set_openai_api_key(state: State<'_, AgentState>, key: String) -> Result<(
     info!("set_openai_api_key: setting API key (length={})", key.len());
     let mut guard = state.openai_api_key.lock().map_err(|e| e.to_string())?;
     *guard = Some(key);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// start_task command — spawns the agent loop in a background tokio task
+// ---------------------------------------------------------------------------
+
+/// Start a multi-round agent task. Returns immediately; events stream via
+/// the `on_event` Channel parameter. Rejects if a task is already running
+/// or if the OpenAI API key has not been set.
+#[tauri::command]
+pub async fn start_task(
+    state: State<'_, AgentState>,
+    task: String,
+    on_event: Channel<TaskEvent>,
+) -> Result<(), String> {
+    info!("start_task: request received — task='{}'", task);
+
+    // ── Guard: already running ────────────────────────────────────
+    if state.task_running.load(Ordering::SeqCst) {
+        warn!("start_task: rejected — a task is already running");
+        return Err("A task is already running. Cancel it first.".to_string());
+    }
+
+    // ── Validate task text ────────────────────────────────────────
+    if task.trim().is_empty() {
+        return Err("Task text must not be empty.".to_string());
+    }
+
+    // ── Validate API key ──────────────────────────────────────────
+    let api_key = {
+        let guard = state.openai_api_key.lock().map_err(|e| e.to_string())?;
+        match guard.clone() {
+            Some(k) if !k.trim().is_empty() => k,
+            _ => {
+                warn!("start_task: rejected — OpenAI API key not set");
+                return Err("OpenAI API key not set. Use set_openai_api_key first.".to_string());
+            }
+        }
+    };
+
+    // ── Clone shared state Arcs for the spawned task ──────────────
+    let cancel_flag = state.running_task_cancel.clone();
+    let task_running = state.task_running.clone();
+
+    // ── Reset cancel flag and mark running ────────────────────────
+    cancel_flag.store(false, Ordering::SeqCst);
+    task_running.store(true, Ordering::SeqCst);
+
+    info!("start_task: spawning agent loop task");
+
+    // ── Spawn the agent loop ──────────────────────────────────────
+    tokio::spawn(async move {
+        let provider = OpenAiProvider::new(api_key, "gpt-4o".to_string());
+        let executor = DesktopToolExecutor::new();
+        let registry = ToolRegistry::default();
+        let config = AgentConfig::default();
+        let emitter = ChannelEventEmitter::new(on_event);
+
+        let result = run_agent_loop(
+            task,
+            Box::new(provider),
+            Box::new(executor),
+            registry,
+            Box::new(emitter),
+            cancel_flag,
+            config,
+        )
+        .await;
+
+        if let Err(ref e) = result {
+            error!("start_task: agent loop failed — {}", e);
+        } else {
+            info!("start_task: agent loop completed successfully");
+        }
+
+        // ── Clear running flag in finally-equivalent block ────────
+        task_running.store(false, Ordering::SeqCst);
+    });
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// cancel_task command — sets the shared cancel flag
+// ---------------------------------------------------------------------------
+
+/// Cancel the currently running agent task. Rejects if no task is running.
+#[tauri::command]
+pub fn cancel_task(state: State<'_, AgentState>) -> Result<(), String> {
+    info!("cancel_task: request received");
+
+    if !state.task_running.load(Ordering::SeqCst) {
+        warn!("cancel_task: rejected — no task is running");
+        return Err("No task is currently running.".to_string());
+    }
+
+    state
+        .running_task_cancel
+        .store(true, Ordering::SeqCst);
+    info!("cancel_task: cancel flag set");
+
     Ok(())
 }
