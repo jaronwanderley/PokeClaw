@@ -8,8 +8,12 @@
 
 pub mod llm_provider;
 pub mod anthropic;
+pub mod local;
 
 // Re-export the core types for convenience so consumers can `use crate::agent::llm::LlmProvider`.
 pub use llm_provider::{
     ChatMessage, LlmProvider, LlmError, LlmResponse, OpenAiProvider, TokenUsage, ToolCall,
 };
+
+// Re-export LocalProvider for convenience.
+pub use local::LocalProvider;
