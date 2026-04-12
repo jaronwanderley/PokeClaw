@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useModel } from '../composables/useModel'
+import { useAgent } from '../composables/useAgent'
 
 defineProps<{
   visible: boolean
@@ -11,6 +13,12 @@ const emit = defineEmits<{
 }>()
 
 const { preferGpu, selectedModelPath, stopSession, getSessionStatus } = useModel()
+const { testAgentRound, setApiKey, lastRoundResult, isRunning, error: agentError } = useAgent()
+
+const apiKeyInput = ref('')
+const agentPrompt = ref('Tap the Messages app')
+const apiKeySaved = ref(false)
+const agentResultExpanded = ref(false)
 
 async function handleStopSession() {
   await stopSession()
@@ -20,6 +28,21 @@ async function handleStopSession() {
 function handleBackendToggle() {
   preferGpu.value = !preferGpu.value
   emit('backendChanged')
+}
+
+async function handleSaveApiKey() {
+  if (!apiKeyInput.value.trim()) return
+  const ok = await setApiKey(apiKeyInput.value.trim())
+  if (ok) {
+    apiKeySaved.value = true
+    apiKeyInput.value = ''
+  }
+}
+
+async function handleTestAgentRound() {
+  if (!agentPrompt.value.trim()) return
+  await testAgentRound(agentPrompt.value.trim())
+  agentResultExpanded.value = true
 }
 </script>
 
@@ -64,6 +87,78 @@ function handleBackendToggle() {
       <button v-if="selectedModelPath" class="change-model-btn" @click="handleStopSession">
         Change Model
       </button>
+
+      <!-- OpenAI API Key -->
+      <div class="setting-section">
+        <div class="setting-name">OpenAI API Key</div>
+        <div class="setting-desc" style="margin-bottom: 8px">
+          Required for agent round testing. Stored in-memory only.
+        </div>
+        <div class="api-key-row">
+          <input
+            v-model="apiKeyInput"
+            type="password"
+            class="api-key-input"
+            placeholder="sk-..."
+            @keyup.enter="handleSaveApiKey"
+          />
+          <button class="save-btn" @click="handleSaveApiKey">
+            {{ apiKeySaved ? '✓' : 'Save' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Agent Test -->
+      <div class="setting-section">
+        <div class="setting-name">Agent Test</div>
+        <div class="setting-desc" style="margin-bottom: 8px">
+          Run one LLM → tool execution round.
+        </div>
+        <div class="agent-test-row">
+          <input
+            v-model="agentPrompt"
+            class="agent-prompt-input"
+            placeholder="Enter a prompt..."
+            @keyup.enter="handleTestAgentRound"
+          />
+          <button
+            class="test-btn"
+            :disabled="isRunning"
+            @click="handleTestAgentRound"
+          >
+            {{ isRunning ? '...' : 'Run' }}
+          </button>
+        </div>
+        <div v-if="agentError" class="agent-error">{{ agentError }}</div>
+        <div v-if="lastRoundResult && agentResultExpanded" class="agent-result">
+          <div class="result-row">
+            <span class="result-key">Model:</span>
+            <span class="result-value">{{ lastRoundResult.model }}</span>
+          </div>
+          <div class="result-row">
+            <span class="result-key">Latency:</span>
+            <span class="result-value">{{ lastRoundResult.latency_ms }}ms</span>
+          </div>
+          <div v-if="lastRoundResult.tool_call" class="result-row">
+            <span class="result-key">Tool:</span>
+            <span class="result-value">{{ lastRoundResult.tool_call.name }}</span>
+          </div>
+          <div v-if="lastRoundResult.tool_call" class="result-row">
+            <span class="result-key">Tool Success:</span>
+            <span class="result-value">{{ lastRoundResult.tool_call.result.success ? '✓' : '✗' }}</span>
+          </div>
+          <div v-if="lastRoundResult.response_text" class="result-row">
+            <span class="result-key">Response:</span>
+            <span class="result-value">{{ lastRoundResult.response_text }}</span>
+          </div>
+          <div v-if="lastRoundResult.token_usage" class="result-row">
+            <span class="result-key">Tokens:</span>
+            <span class="result-value">
+              {{ lastRoundResult.token_usage.prompt_tokens }}+{{ lastRoundResult.token_usage.completion_tokens }}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -244,5 +339,93 @@ function handleBackendToggle() {
 
 .change-model-btn:active {
   transform: scale(0.98);
+}
+
+.setting-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+  border-top: 1px solid var(--div);
+}
+
+.api-key-row,
+.agent-test-row {
+  display: flex;
+  gap: 8px;
+}
+
+.api-key-input,
+.agent-prompt-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--t1);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.api-key-input:focus,
+.agent-prompt-input:focus {
+  border-color: var(--accent);
+}
+
+.save-btn,
+.test-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #151211;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.save-btn:hover,
+.test-btn:hover {
+  opacity: 0.9;
+}
+
+.test-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-error {
+  font-size: 12px;
+  color: #e74c3c;
+  margin-top: 4px;
+}
+
+.agent-result {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.result-row {
+  font-size: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.result-key {
+  color: var(--t2);
+  min-width: 70px;
+}
+
+.result-value {
+  color: var(--t1);
+  word-break: break-all;
 }
 </style>
