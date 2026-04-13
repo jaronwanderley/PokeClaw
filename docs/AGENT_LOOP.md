@@ -1,4 +1,4 @@
-# PokeClaw Agent Loop Design
+# PitoAgent Agent Loop Design
 
 ## Overview
 

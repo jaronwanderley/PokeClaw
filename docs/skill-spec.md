@@ -1,4 +1,4 @@
-# PokeClaw Skill File Specification v1.0
+# PitoAgent Skill File Specification v1.0
 
 ## Overview
 
@@ -9,7 +9,7 @@ Skills are written in natural language (Markdown). What you write is what the mo
 ## File Format
 
 **Naming:** `{skill-name}.skill.md`
-**Location:** `assets/skills/` (built-in), `/sdcard/PokeClaw/skills/` (user-created)
+**Location:** `assets/skills/` (built-in), `/sdcard/PitoAgent/skills/` (user-created)
 **Encoding:** UTF-8
 
 ## Frontmatter
@@ -19,14 +19,14 @@ Delimited by `---` lines. Flat key-value pairs only.
 ```
 ---
 description: <required> One sentence. Include a trigger example. Shown to the router LLM for skill selection.
-tools: <required> Comma-separated list of PokeClaw tool identifiers this skill uses.
+tools: <required> Comma-separated list of PitoAgent tool identifiers this skill uses.
 author: <optional> Name or handle.
 version: <optional> Semver.
 ---
 ```
 
 - `description` is what the router LLM sees. Write it to maximize matching accuracy. Include an example trigger phrase after a comma.
-- `tools` must use exact PokeClaw tool identifiers. Unknown tools produce a load-time warning; the skill still loads with valid tools. Zero valid tools = skill skipped.
+- `tools` must use exact PitoAgent tool identifiers. Unknown tools produce a load-time warning; the skill still loads with valid tools. Zero valid tools = skill skipped.
 
 ## Body
 

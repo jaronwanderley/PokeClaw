@@ -1,4 +1,4 @@
-# PokeClaw Architecture
+# PitoAgent Architecture
 
 ## Module Dependency Graph
 
