@@ -199,22 +199,6 @@ fn rand_simple_sixteen() -> u16 {
     (x as u16) & 0xFFFF
 }
 
-/// Convert days since Unix epoch to (year, month, day).
-/// Used by desktop mock get_device_info for time category.
-fn date_from_days(days_since_epoch: u64) -> (u32, u32, u32) {
-    // Algorithm from Howard Hinnant: http://howardhinnant.github.io/date_algorithms.html
-    let z = days_since_epoch as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
-    let y = (y + if m <= 2 { 1 } else { 0 }) as u32;
-    (y, m, d)
-}
 
 // ---------------------------------------------------------------------------
 // Session command implementations (no #[tauri::command] here — just logic)
@@ -838,123 +822,51 @@ mod desktop_commands {
         }
     }
 
-    /// Desktop mock for get_device_info.
-    /// Returns category-specific mock info strings matching the format
-    /// produced by the Android GetDeviceInfoTool categories.
-    /// Returns an error for unknown categories.
+    /// Desktop real get_device_info.
+    /// Delegates to desktop::system for real OS/hardware info (CPU, RAM, disk, OS).
     #[tauri::command]
     pub fn get_device_info(category: String) -> ToolResult {
-        log::info!("get_device_info (desktop mock): category='{}'", category);
-        let info = match category.to_lowercase().as_str() {
-            "battery" => "Battery: 85%, charging",
-            "wifi" => "WiFi: connected to 'HomeWifi', 2.4GHz, signal -45dBm, 65Mbps",
-            "storage" => "Storage: 45.2 GB used of 128.0 GB (35%), 82.8 GB free",
-            "bluetooth" => "Bluetooth: enabled, paired devices: [Galaxy Buds, Car Audio]",
-            "screen" => "Brightness: 60%, Dark mode: OFF",
-            "device" => "Android 14 (API 34), Model: Google Pixel 8",
-            "time" => {
-                use std::time::{SystemTime, UNIX_EPOCH};
-                let secs = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                // Simple UTC time formatting without chrono
-                let days_since_epoch = secs / 86400;
-                let time_of_day = secs % 86400;
-                let hours = (time_of_day / 3600) as u32;
-                let minutes = ((time_of_day % 3600) / 60) as u32;
-                let seconds = (time_of_day % 60) as u32;
-                // Approximate year/month/day (good enough for mock data)
-                let (year, month, day) = date_from_days(days_since_epoch);
-                let time_str = format!(
-                    "Time: {:04}-{:02}-{:02} {:02}:{:02}:{:02} (mock UTC)",
-                    year, month, day, hours, minutes, seconds
-                );
-                return ToolResult {
-                    success: true,
-                    data: Some(serde_json::json!({ "info": time_str })),
-                    error: None,
-                };
-            }
-            _ => {
-                return ToolResult {
-                    success: false,
-                    data: None,
-                    error: Some(format!(
-                        "Unknown category '{}'. Supported: battery, wifi, storage, bluetooth, screen, device, time",
-                        category
-                    )),
-                };
-            }
-        };
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "info": info })),
-            error: None,
-        }
+        log::info!("get_device_info: delegating to desktop::system — category='{}'", category);
+        desktop::system::do_get_device_info(&category)
     }
 
-    /// Desktop mock for check_permissions.
-    /// Returns a PermissionStatus with accessibility enabled/running true,
-    /// and notification/foreground_service false (simulating a typical
-    /// development environment where accessibility is on but notifications
-    /// and foreground service are not yet granted).
+    /// Desktop real check_permissions.
+    /// Delegates to desktop::system for real OS permission status.
     #[tauri::command]
     pub fn check_permissions() -> ToolResult {
-        log::info!("check_permissions (desktop mock): returning mock permission status");
-        let status = PermissionStatus {
-            accessibility_enabled: true,
-            accessibility_running: true,
-            notification_enabled: false,
-            foreground_service: false,
-        };
-        ToolResult {
-            success: true,
-            data: Some(serde_json::to_value(&status).unwrap_or_else(|_| serde_json::json!({}))),
-            error: None,
-        }
+        log::info!("check_permissions: delegating to desktop::system");
+        desktop::system::do_check_permissions()
     }
 
     // -----------------------------------------------------------------
     // Gesture tool desktop mocks
     // -----------------------------------------------------------------
 
-    /// Desktop mock for tap. Simulates tapping at the given coordinates.
+    /// Desktop real tap. Delegates to desktop::automation for real OS-level click.
     #[tauri::command]
     pub fn tap(x: i32, y: i32) -> ToolResult {
-        log::info!("tap (desktop mock): x={}, y={}", x, y);
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Tapped at ({}, {})", x, y) })),
-            error: None,
-        }
+        log::info!("tap: delegating to desktop::automation — x={}, y={}", x, y);
+        desktop::automation::do_tap(x, y)
     }
 
-    /// Desktop mock for swipe. Simulates a swipe gesture from start to end.
+    /// Desktop real swipe. Delegates to desktop::automation for real OS-level mouse drag.
     #[tauri::command]
     pub fn swipe(start_x: i32, start_y: i32, end_x: i32, end_y: i32, duration_ms: Option<i32>) -> ToolResult {
-        let dur = duration_ms.unwrap_or(300);
         log::info!(
-            "swipe (desktop mock): ({},{}) -> ({},{}) duration={}ms",
-            start_x, start_y, end_x, end_y, dur
+            "swipe: delegating to desktop::automation — ({},{}) -> ({},{})",
+            start_x, start_y, end_x, end_y
         );
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Swiped from ({},{}) to ({},{}) in {}ms", start_x, start_y, end_x, end_y, dur) })),
-            error: None,
-        }
+        desktop::automation::do_swipe(start_x, start_y, end_x, end_y, duration_ms)
     }
 
-    /// Desktop mock for long_press. Simulates a long press at the given coordinates.
+    /// Desktop real long_press. Delegates to desktop::automation for real OS-level click-and-hold.
     #[tauri::command]
     pub fn long_press(x: i32, y: i32, duration_ms: Option<i32>) -> ToolResult {
-        let dur = duration_ms.unwrap_or(500);
-        log::info!("long_press (desktop mock): x={}, y={}, duration={}ms", x, y, dur);
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Long pressed at ({},{}) for {}ms", x, y, dur) })),
-            error: None,
-        }
+        log::info!(
+            "long_press: delegating to desktop::automation — ({},{})",
+            x, y
+        );
+        desktop::automation::do_long_press(x, y, duration_ms)
     }
 
     /// Desktop mock for tap_node. Simulates tapping an accessibility node by ID.
@@ -976,25 +888,14 @@ mod desktop_commands {
         }
     }
 
-    /// Desktop mock for input_text. Simulates entering text into a node.
+    /// Desktop real input_text. Delegates to desktop::automation for real OS-level keyboard input.
     #[tauri::command]
     pub fn input_text(text: String, node_id: Option<String>, clear_first: Option<bool>) -> ToolResult {
         log::info!(
-            "input_text (desktop mock): text='{}', node_id={:?}, clear_first={:?}",
-            text, node_id, clear_first
+            "input_text: delegating to desktop::automation — text='{}' ({} chars)",
+            text, text.len()
         );
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text parameter must not be empty".into()),
-            };
-        }
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Input text: '{}' (clear_first={})", text, clear_first.unwrap_or(false)) })),
-            error: None,
-        }
+        desktop::automation::do_input_text(&text, node_id.as_deref(), clear_first)
     }
 
     /// Desktop mock for scroll_to_find. Simulates scrolling to find an element
@@ -1143,41 +1044,11 @@ mod desktop_commands {
         }
     }
 
-    /// Desktop mock for system_key. Simulates pressing a system key
-    /// (back, home, recent_apps, notifications, collapse_notifications,
-    /// lock_screen, unlock_screen). Returns an error for unknown actions.
+    /// Desktop real system_key. Delegates to desktop::automation for real OS-level key press.
     #[tauri::command]
     pub fn system_key(action: String) -> ToolResult {
-        log::info!("system_key (desktop mock): action='{}'", action);
-        let valid_actions = [
-            "back",
-            "home",
-            "recent_apps",
-            "notifications",
-            "collapse_notifications",
-            "lock_screen",
-            "unlock_screen",
-        ];
-        let action_lower = action.to_lowercase();
-        if !valid_actions.contains(&action_lower.as_str()) {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some(format!(
-                    "Unknown system key action '{}'. Supported: {}",
-                    action,
-                    valid_actions.join(", ")
-                )),
-            };
-        }
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "message": format!("Pressed system key: {}", action_lower),
-                "action": action_lower,
-            })),
-            error: None,
-        }
+        log::info!("system_key: delegating to desktop::automation — action='{}'", action);
+        desktop::automation::do_system_key(&action)
     }
 
     /// Desktop mock for send_chat_message. Simulates the compound flow:
@@ -1235,39 +1106,14 @@ mod desktop_commands {
         }
     }
 
-    /// Desktop mock for clipboard. Supports "get" and "set" actions.
-    /// For "set", requires a text parameter. Returns clipboard content.
+    /// Desktop real clipboard. Delegates to desktop::system for real OS clipboard access.
     #[tauri::command]
     pub fn clipboard(action: String, text: Option<String>) -> ToolResult {
-        log::info!("clipboard (desktop mock): action='{}', text={:?}", action, text);
+        log::info!("clipboard: delegating to desktop::system — action='{}'", action);
         let action_lower = action.to_lowercase();
         match action_lower.as_str() {
-            "get" => ToolResult {
-                success: true,
-                data: Some(serde_json::json!({
-                    "message": "Clipboard content retrieved",
-                    "text": "Hello from mock clipboard",
-                })),
-                error: None,
-            },
-            "set" => {
-                let clip_text = text.unwrap_or_default();
-                if clip_text.trim().is_empty() {
-                    return ToolResult {
-                        success: false,
-                        data: None,
-                        error: Some("text parameter required for 'set' action".into()),
-                    };
-                }
-                ToolResult {
-                    success: true,
-                    data: Some(serde_json::json!({
-                        "message": format!("Clipboard set to: '{}'", clip_text),
-                        "text": clip_text,
-                    })),
-                    error: None,
-                }
-            }
+            "get" => desktop::system::do_clipboard_get(),
+            "set" => desktop::system::do_clipboard_set(&text.unwrap_or_default()),
             _ => ToolResult {
                 success: false,
                 data: None,
