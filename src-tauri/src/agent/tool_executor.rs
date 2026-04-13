@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ---------------------------------------------------------------------------
+// Desktop real-OS imports (gated same as DesktopToolExecutor)
+// ---------------------------------------------------------------------------
+#[cfg(not(target_os = "android"))]
+use tauri_plugin_pokeclaw::desktop::{automation, system};
+
+// ---------------------------------------------------------------------------
 // ToolResult — mirrors plugin ToolResult for agent-internal use
 // ---------------------------------------------------------------------------
 
@@ -71,11 +77,26 @@ pub trait ToolExecutor: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// DesktopToolExecutor — desktop mock dispatch for all 28 tools
+// Desktop real-OS ToolResult conversion
 // ---------------------------------------------------------------------------
 
-/// Executes tool calls using the same desktop mock logic as the Tauri commands.
-/// Each tool name maps to a function that returns a mock ToolResult.
+/// Convert the plugin's ToolResult to the agent-internal ToolResult.
+/// Both structs have identical public fields (success, data, error).
+#[cfg(not(target_os = "android"))]
+fn convert_tool_result(plugin_result: tauri_plugin_pokeclaw::ToolResult) -> ToolResult {
+    ToolResult {
+        success: plugin_result.success,
+        data: plugin_result.data,
+        error: plugin_result.error,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DesktopToolExecutor — dispatches real OS calls for input/clipboard/device tools
+// ---------------------------------------------------------------------------
+
+/// Executes tool calls using real OS-level implementations for desktop input,
+/// clipboard, and device-info tools. Other tools remain as mock implementations.
 pub struct DesktopToolExecutor;
 
 impl DesktopToolExecutor {
@@ -100,16 +121,41 @@ impl ToolExecutor for DesktopToolExecutor {
             // --- Observation tools ---
             "get_screen_info" => self.mock_get_screen_info(),
             "find_node_info" => self.mock_find_node_info(&params),
-            "input_text" => self.mock_input_text(&params),
-            "system_key" => self.mock_system_key(&params),
+            "input_text" => {
+                let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let node_id = params.get("node_id").and_then(|v| v.as_str());
+                let clear_first = params.get("clear_first").and_then(|v| v.as_bool());
+                convert_tool_result(automation::do_input_text(text, node_id, clear_first))
+            }
+            "system_key" => {
+                let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                convert_tool_result(automation::do_system_key(key))
+            }
             "open_app" => self.mock_open_app(&params),
             "get_installed_apps" => self.mock_get_installed_apps(&params),
             "take_screenshot" => self.mock_take_screenshot(&params),
             "wait" => self.mock_wait(&params),
             "repeat_actions" => self.mock_repeat_actions(&params),
-            "clipboard" => self.mock_clipboard(&params),
+            "clipboard" => {
+                let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("get");
+                match action {
+                    "get" => convert_tool_result(system::do_clipboard_get()),
+                    "set" => {
+                        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                        convert_tool_result(system::do_clipboard_set(text))
+                    }
+                    _ => ToolResult {
+                        success: false,
+                        data: None,
+                        error: Some(format!("Unknown clipboard action: {}", action)),
+                    },
+                }
+            }
             "send_file" => self.mock_send_file(&params),
-            "get_device_info" => self.mock_get_device_info(&params),
+            "get_device_info" => {
+                let category = params.get("category").and_then(|v| v.as_str()).unwrap_or("device");
+                convert_tool_result(system::do_get_device_info(category))
+            }
             "get_notifications" => self.mock_get_notifications(),
             "make_call" => self.mock_make_call(&params),
             "finish" => self.mock_finish(&params),
@@ -119,11 +165,27 @@ impl ToolExecutor for DesktopToolExecutor {
             "kb_append" => self.mock_kb_append(&params),
             "kb_add_todo" => self.mock_kb_add_todo(&params),
 
-            // --- Mobile-only tools ---
-            "tap" => self.mock_tap(&params),
+            // --- Mobile-only tools (real OS on desktop) ---
+            "tap" => {
+                let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                convert_tool_result(automation::do_tap(x, y))
+            }
             "tap_node" => self.mock_tap_node(&params),
-            "long_press" => self.mock_long_press(&params),
-            "swipe" => self.mock_swipe(&params),
+            "long_press" => {
+                let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let duration_ms = params.get("duration_ms").and_then(|v| v.as_i64()).map(|d| d as i32);
+                convert_tool_result(automation::do_long_press(x, y, duration_ms))
+            }
+            "swipe" => {
+                let sx = params.get("start_x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let sy = params.get("start_y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let ex = params.get("end_x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let ey = params.get("end_y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let duration_ms = params.get("duration_ms").and_then(|v| v.as_i64()).map(|d| d as i32);
+                convert_tool_result(automation::do_swipe(sx, sy, ex, ey, duration_ms))
+            }
             "scroll_to_find" => self.mock_scroll_to_find(&params),
             "find_and_tap" => self.mock_find_and_tap(&params),
             "send_message" => self.mock_send_message(&params),
@@ -215,39 +277,6 @@ impl DesktopToolExecutor {
         }
     }
 
-    fn mock_input_text(&self, params: &Value) -> ToolResult {
-        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text parameter must not be empty".into()),
-            };
-        }
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Input text: '{}'", text) })),
-            error: None,
-        }
-    }
-
-    fn mock_system_key(&self, params: &Value) -> ToolResult {
-        let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("");
-        let valid = ["back", "home", "recent", "enter", "delete", "tab", "escape", "volume_up", "volume_down"];
-        if !valid.contains(&key.to_lowercase().as_str()) {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some(format!("Unknown key: '{}'. Supported: {}", key, valid.join(", "))),
-            };
-        }
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Pressed key: {}", key) })),
-            error: None,
-        }
-    }
-
     fn mock_open_app(&self, params: &Value) -> ToolResult {
         let app_name = params.get("app_name").and_then(|v| v.as_str()).unwrap_or("");
         if app_name.trim().is_empty() {
@@ -307,30 +336,6 @@ impl DesktopToolExecutor {
         }
     }
 
-    fn mock_clipboard(&self, params: &Value) -> ToolResult {
-        let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("get");
-        match action {
-            "get" => ToolResult {
-                success: true,
-                data: Some(serde_json::json!({ "text": "Hello from mock clipboard" })),
-                error: None,
-            },
-            "set" => {
-                let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                ToolResult {
-                    success: true,
-                    data: Some(serde_json::json!({ "text": text })),
-                    error: None,
-                }
-            }
-            _ => ToolResult {
-                success: false,
-                data: None,
-                error: Some(format!("Unknown clipboard action: {}", action)),
-            },
-        }
-    }
-
     fn mock_send_file(&self, params: &Value) -> ToolResult {
         let contact = params.get("contact").and_then(|v| v.as_str()).unwrap_or("");
         let app = params.get("app").and_then(|v| v.as_str()).unwrap_or("");
@@ -338,19 +343,6 @@ impl DesktopToolExecutor {
             success: true,
             data: Some(serde_json::json!({
                 "message": format!("Sent file to '{}' via '{}'", contact, app)
-            })),
-            error: None,
-        }
-    }
-
-    fn mock_get_device_info(&self, _params: &Value) -> ToolResult {
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "model": "Google Pixel 8",
-                "os": "Android 14",
-                "battery": "85%",
-                "screen": "1080x2400",
             })),
             error: None,
         }
@@ -440,16 +432,6 @@ impl DesktopToolExecutor {
 
     // --- Mobile tool mocks ---
 
-    fn mock_tap(&self, params: &Value) -> ToolResult {
-        let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
-        let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Tapped at ({}, {})", x, y) })),
-            error: None,
-        }
-    }
-
     fn mock_tap_node(&self, params: &Value) -> ToolResult {
         let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
         if text.trim().is_empty() {
@@ -462,28 +444,6 @@ impl DesktopToolExecutor {
         ToolResult {
             success: true,
             data: Some(serde_json::json!({ "message": format!("Tapped node with text '{}' at (540,160)", text) })),
-            error: None,
-        }
-    }
-
-    fn mock_long_press(&self, params: &Value) -> ToolResult {
-        let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
-        let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Long pressed at ({}, {})", x, y) })),
-            error: None,
-        }
-    }
-
-    fn mock_swipe(&self, params: &Value) -> ToolResult {
-        let sx = params.get("start_x").and_then(|v| v.as_i64()).unwrap_or(0);
-        let sy = params.get("start_y").and_then(|v| v.as_i64()).unwrap_or(0);
-        let ex = params.get("end_x").and_then(|v| v.as_i64()).unwrap_or(0);
-        let ey = params.get("end_y").and_then(|v| v.as_i64()).unwrap_or(0);
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Swiped from ({},{}) to ({},{})", sx, sy, ex, ey) })),
             error: None,
         }
     }

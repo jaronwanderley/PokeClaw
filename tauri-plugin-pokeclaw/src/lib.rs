@@ -21,7 +21,7 @@ pub mod _ffi_test_exports {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(target_os = "android"))]
-mod desktop;
+pub mod desktop;
 
 // ---------------------------------------------------------------------------
 // Observation tool shared types (desktop + Android contract)
