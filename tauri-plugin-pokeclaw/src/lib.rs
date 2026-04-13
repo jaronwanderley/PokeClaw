@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{
     plugin::{Builder, TauriPlugin},
     Runtime, State,
@@ -143,6 +143,10 @@ impl Drop for LlmSessionGuard {
 pub struct InferenceState {
     pub active_session: Mutex<Option<LlmSessionGuard>>,
     pub session_status: Mutex<SessionStatus>,
+    /// Desktop-only: loaded LiteRT-LM engine for real inference.
+    /// `None` if library not found (echo mock fallback) or not yet loaded.
+    #[cfg(not(target_os = "android"))]
+    pub litert_engine: Arc<Mutex<Option<desktop::ffi::LitertEngine>>>,
 }
 
 impl Default for InferenceState {
@@ -150,6 +154,8 @@ impl Default for InferenceState {
         Self {
             active_session: Mutex::new(None),
             session_status: Mutex::new(SessionStatus::Idle),
+            #[cfg(not(target_os = "android"))]
+            litert_engine: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -205,6 +211,38 @@ fn date_from_days(days_since_epoch: u64) -> (u32, u32, u32) {
 mod session_impl {
     use super::*;
 
+    /// Try to discover the LitertEngine shared library on the system.
+    /// Returns the first path that exists, or None.
+    #[cfg(not(target_os = "android"))]
+    fn find_litertlm_library() -> Option<std::path::PathBuf> {
+        let candidates = [
+            // Next to the executable (most common for Tauri apps)
+            std::env::current_exe().ok()?.parent()?.join("litertlm_bridge.dll"),
+            std::env::current_exe().ok()?.parent()?.join("litertlm_bridge.so"),
+            std::env::current_exe().ok()?.parent()?.join("litertlm_bridge.dylib"),
+            // Build output directory
+            std::path::PathBuf::from("target/release/litertlm_bridge.dll"),
+            std::path::PathBuf::from("target/release/litertlm_bridge.so"),
+            // CMake build output
+            std::path::PathBuf::from("tauri-plugin-pokeclaw/src/desktop/ffi/build/output/litertlm_bridge.dll"),
+            std::path::PathBuf::from("tauri-plugin-pokeclaw/src/desktop/ffi/build/output/litertlm_bridge.so"),
+        ];
+        for candidate in &candidates {
+            if candidate.exists() {
+                log::info!(
+                    "find_litertlm_library: found at '{}'",
+                    candidate.display()
+                );
+                return Some(candidate.clone());
+            }
+        }
+        log::info!(
+            "find_litertlm_library: no library found in {} candidate paths",
+            candidates.len()
+        );
+        None
+    }
+
     pub fn do_start_session(
         state: &InferenceState,
         model_path: String,
@@ -247,10 +285,75 @@ mod session_impl {
 
         #[cfg(not(target_os = "android"))]
         {
-            log::info!(
-                "start_session (desktop mock): creating mock session — session_id={}",
-                session_id
-            );
+            // Try to load the real LiteRT-LM engine via FFI.
+            // If the shared library is not found, fall back to echo mock.
+            let engine_result = match find_litertlm_library() {
+                Some(lib_path) => {
+                    log::info!(
+                        "start_session (desktop): loading LiteRT-LM engine — lib_path={}, model_path={}, backend={}",
+                        lib_path.display(), model_path, backend
+                    );
+                    match desktop::ffi::LitertEngine::new(&lib_path) {
+                        Ok(mut engine) => {
+                            match engine.load_model(&model_path, backend) {
+                                Ok(()) => {
+                                    log::info!(
+                                        "start_session (desktop): engine loaded successfully — model_path={}, backend={}",
+                                        model_path, backend
+                                    );
+                                    Ok(Some(engine))
+                                }
+                                Err(e) => {
+                                    log::error!(
+                                        "start_session (desktop): engine model load failed — {}. Falling back to echo mock.",
+                                        e
+                                    );
+                                    // Set error status briefly, then override to ready with mock
+                                    {
+                                        let mut status = state.session_status.lock().map_err(|e2| e2.to_string())?;
+                                        *status = SessionStatus::Error(format!("Model load failed: {}", e));
+                                    }
+                                    Ok(None)
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "start_session (desktop): LiteRT-LM library load failed — {}. Falling back to echo mock.",
+                                e
+                            );
+                            Ok(None)
+                        }
+                    }
+                }
+                None => {
+                    log::warn!(
+                        "start_session (desktop): litertlm_bridge library not found. \
+                         Falling back to echo mock. Build the C++ shim to enable real inference."
+                    );
+                    Ok(None)
+                }
+            };
+
+            match engine_result {
+                Ok(Some(engine)) => {
+                    // Real engine loaded — store it
+                    let mut litert = state.litert_engine.lock().map_err(|e| e.to_string())?;
+                    *litert = Some(engine);
+                    log::info!(
+                        "start_session (desktop): real inference engine active — session_id={}, backend={}",
+                        session_id, backend
+                    );
+                }
+                Ok(None) => {
+                    // Fallback to echo mock — no engine stored
+                    log::info!(
+                        "start_session (desktop mock): creating echo mock session — session_id={}",
+                        session_id
+                    );
+                }
+                Err(e) => return Err(e),
+            }
         }
 
         let guard = LlmSessionGuard {
@@ -298,6 +401,19 @@ mod session_impl {
             guard.backend
         );
 
+        // Drop the LiteRT-LM engine if present (desktop only)
+        #[cfg(not(target_os = "android"))]
+        {
+            let mut litert = state.litert_engine.lock().map_err(|e| e.to_string())?;
+            if litert.is_some() {
+                log::info!(
+                    "stop_session: destroying LiteRT-LM engine — model_path={}",
+                    litert.as_ref().map(|e| e.model_path().unwrap_or("unknown")).unwrap_or("none")
+                );
+                *litert = None; // Drop triggers LitertEngineInner::drop → engine_destroy
+            }
+        }
+
         {
             let mut status = state.session_status.lock().map_err(|e| e.to_string())?;
             *status = SessionStatus::Idle;
@@ -333,9 +449,11 @@ mod session_impl {
         }
     }
 
-    /// Desktop-only streaming send_message. Streams echo response word-by-word
-    /// through the Tauri Channel so the frontend sees the same StreamEvent
-    /// contract as the Kotlin Android path.
+    /// Desktop-only streaming send_message.
+    ///
+    /// If a real LiteRT-LM engine is loaded, creates a conversation and
+    /// streams tokens through the callback. If no engine is loaded (echo mock
+    /// fallback), streams a word-by-word echo response.
     #[cfg(not(target_os = "android"))]
     pub async fn do_send_message_streaming(
         state: &InferenceState,
@@ -359,12 +477,135 @@ mod session_impl {
             }
         }
 
+        // Check if we have a real engine
+        let maybe_engine_arc = {
+            let litert = state.litert_engine.lock().map_err(|e| e.to_string())?;
+            match litert.as_ref() {
+                Some(_) => Some(Arc::clone(&state.litert_engine)),
+                None => None,
+            }
+        };
+
+        if let Some(engine_arc) = maybe_engine_arc {
+            // ---- Real LiteRT-LM inference path ----
+            do_stream_real_inference(engine_arc, message, channel).await
+        } else {
+            // ---- Echo mock fallback path ----
+            do_stream_echo_mock(message, channel).await
+        }
+    }
+
+    /// Stream real LiteRT-LM inference tokens through the Tauri Channel.
+    ///
+    /// Creates a new conversation on the shared engine, calls
+    /// `send_message_streaming` (which blocks on the C++ callback thread),
+    /// and forwards each token batch as a `StreamEvent::TokenBatch`.
+    #[cfg(not(target_os = "android"))]
+    async fn do_stream_real_inference(
+        engine_arc: Arc<Mutex<Option<desktop::ffi::LitertEngine>>>,
+        message: String,
+        channel: &tauri::ipc::Channel<StreamEvent>,
+    ) -> Result<(), String> {
+        log::info!("do_stream_real_inference: creating conversation for message_len={}", message.len());
+
+        // Create a conversation while holding the engine lock
+        let litert_session = {
+            let litert = engine_arc.lock().map_err(|e| e.to_string())?;
+            match litert.as_ref() {
+                Some(engine) => {
+                    engine.create_conversation().map_err(|e| {
+                        log::error!("do_stream_real_inference: conversation create failed — {}", e);
+                        format!("Failed to create conversation: {}", e)
+                    })
+                }
+                None => Err("Engine was dropped between start_session and send_message".into()),
+            }
+        }?;
+
+        let session_id = litert_session.session_id().to_string();
+        log::info!(
+            "do_stream_real_inference: conversation created — session_id={}",
+            session_id
+        );
+
+        // send_message_streaming blocks on the C++ callback thread,
+        // so we must run it in a blocking context.
+        let channel_clone = channel.clone();
+        let msg_for_log = message.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            litert_session.send_message_streaming(&message, |token_text: &str, batch_index: u32| {
+                log::debug!(
+                    "send_message_streaming: batch {} sent ({} chars)",
+                    batch_index,
+                    token_text.len()
+                );
+                if let Err(e) = channel_clone.send(StreamEvent::TokenBatch {
+                    tokens: token_text.to_string(),
+                    batch_index,
+                }) {
+                    log::warn!(
+                        "send_message_streaming: channel.send failed for batch {} — frontend may have disconnected: {}",
+                        batch_index, e
+                    );
+                }
+            })
+        }).await;
+
+        match result {
+            Ok(Ok((full_text, total_chunks))) => {
+                log::info!(
+                    "do_stream_real_inference: stream complete — session_id={}, total_chunks={}, total_chars={}",
+                    session_id, total_chunks, full_text.len()
+                );
+                if let Err(e) = channel.send(StreamEvent::Complete {
+                    full_text,
+                    token_count: total_chunks,
+                }) {
+                    log::warn!(
+                        "do_stream_real_inference: channel.send failed for complete event — {}",
+                        e
+                    );
+                }
+                Ok(())
+            }
+            Ok(Err(ffi_err)) => {
+                let err_msg = format!("Inference failed: {}", ffi_err);
+                log::error!(
+                    "do_stream_real_inference: inference error — session_id={}, message='{}', error={}",
+                    session_id, msg_for_log, ffi_err
+                );
+                let _ = channel.send(StreamEvent::Error {
+                    message: err_msg.clone(),
+                });
+                Err(err_msg)
+            }
+            Err(join_err) => {
+                let err_msg = format!("Inference task panicked: {}", join_err);
+                log::error!(
+                    "do_stream_real_inference: spawn_blocking panicked — session_id={}",
+                    session_id
+                );
+                let _ = channel.send(StreamEvent::Error {
+                    message: err_msg.clone(),
+                });
+                Err(err_msg)
+            }
+        }
+    }
+
+    /// Echo mock streaming — word-by-word with 80ms delays.
+    #[cfg(not(target_os = "android"))]
+    async fn do_stream_echo_mock(
+        message: String,
+        channel: &tauri::ipc::Channel<StreamEvent>,
+    ) -> Result<(), String> {
         let echo_text = format!("Echo: {}", message);
         let words: Vec<&str> = echo_text.split_whitespace().collect();
         let total_words = words.len();
 
         log::info!(
-            "send_message_streaming: starting stream — {} words to send in batches",
+            "send_message_streaming (echo mock): starting stream — {} words to send in batches",
             total_words
         );
 
@@ -375,7 +616,7 @@ mod session_impl {
         while let Some(batch) = word_iter.next() {
             let tokens = batch.join(" ");
             log::debug!(
-                "send_message_streaming: sending batch {} — tokens='{}'",
+                "send_message_streaming (echo mock): sending batch {} — tokens='{}'",
                 batch_index,
                 tokens
             );
@@ -385,9 +626,8 @@ mod session_impl {
                 batch_index,
             }) {
                 log::warn!(
-                    "send_message_streaming: channel.send failed for batch {} — frontend may have disconnected: {}",
-                    batch_index,
-                    e
+                    "send_message_streaming (echo mock): channel.send failed for batch {} — frontend may have disconnected: {}",
+                    batch_index, e
                 );
                 return Ok(()); // Non-fatal: frontend disconnected
             }
@@ -399,9 +639,9 @@ mod session_impl {
         }
 
         let full_text = echo_text.clone();
-        let token_count = batch_index; // Each batch counts as one "token unit"
+        let token_count = batch_index;
         log::info!(
-            "send_message_streaming: stream complete — token_count={}, full_text='{}'",
+            "send_message_streaming (echo mock): stream complete — token_count={}, full_text='{}'",
             token_count,
             full_text
         );
@@ -411,7 +651,7 @@ mod session_impl {
             token_count,
         }) {
             log::warn!(
-                "send_message_streaming: channel.send failed for complete event — frontend may have disconnected: {}",
+                "send_message_streaming (echo mock): channel.send failed for complete event — {}",
                 e
             );
         }
