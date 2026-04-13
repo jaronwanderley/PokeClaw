@@ -469,10 +469,10 @@ impl Drop for LitertEngineInner {
 /// Top-level handle for a loaded LiteRT-LM engine.
 ///
 /// Usage:
-/// ```no_run
-/// let engine = LitertEngine::new("path/to/litertlm_bridge.dll")?;
-/// let session = engine.create_session("model.litertlm", "gpu")?;
-/// let (text, chunks) = session.send_message_streaming("Hello", |tok, idx| {
+/// ```ignore
+/// let mut engine = LitertEngine::new("path/to/litertlm_bridge.dll")?;
+/// let mut engine2 = engine.create_session("model.litertlm", "gpu")?;
+/// let (text, chunks) = engine2.send_message_streaming("Hello", |tok, idx| {
 ///     println!("[{}] {}", idx, tok);
 /// })?;
 /// ```

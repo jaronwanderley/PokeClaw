@@ -16,6 +16,8 @@ tokio = { version = "1", features = ["time"] }
 # Desktop-only: dynamic library loading for LiteRT-LM FFI shim
 [target.'cfg(not(target_os = "android"))'.dependencies]
 libloading = "0.8"
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
 
 [build-dependencies]
 tauri-plugin = { version = "2.0.0", features = ["build"] }
