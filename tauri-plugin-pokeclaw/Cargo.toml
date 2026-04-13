@@ -13,5 +13,9 @@ serde_json = "1.0"
 log = "0.4"
 tokio = { version = "1", features = ["time"] }
 
+# Desktop-only: dynamic library loading for LiteRT-LM FFI shim
+[target.'cfg(not(target_os = "android"))'.dependencies]
+libloading = "0.8"
+
 [build-dependencies]
 tauri-plugin = { version = "2.0.0", features = ["build"] }
