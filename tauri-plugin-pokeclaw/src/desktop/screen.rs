@@ -186,3 +186,60 @@ pub fn do_find_node_info(text: String) -> ToolResult {
         }
     }
 }
+
+/// Enumerate all currently running applications by checking open windows.
+pub fn do_get_installed_apps(filter: Option<&str>) -> ToolResult {
+    log::info!("do_get_installed_apps: filter={:?}", filter);
+
+    let result = (|| -> Result<Vec<serde_json::Value>, String> {
+        let windows = Window::all().map_err(|e| format!("Failed to get windows: {}", e))?;
+        let filter_lower = filter.map(|f| f.to_lowercase());
+
+        let mut apps = std::collections::HashSet::new();
+        let mut app_list = Vec::new();
+
+        for window in windows {
+            let app_name = window.app_name().unwrap_or_else(|_| "Unknown".to_string());
+            if app_name == "Unknown" || app_name.is_empty() {
+                continue;
+            }
+
+            if let Some(ref f) = filter_lower {
+                if !app_name.to_lowercase().contains(f) {
+                    continue;
+                }
+            }
+
+            if apps.insert(app_name.clone()) {
+                app_list.push(json!({
+                    "app_name": app_name,
+                    "package_name": app_name, // On desktop, we use app name as package handle
+                    "is_system": false
+                }));
+            }
+        }
+
+        Ok(app_list)
+    })();
+
+    match result {
+        Ok(apps) => {
+            log::info!("do_get_installed_apps: success, found {} apps", apps.len());
+            ToolResult {
+                success: true,
+                data: Some(json!({
+                    "apps": apps
+                })),
+                error: None,
+            }
+        }
+        Err(e) => {
+            log::error!("do_get_installed_apps: failed — {}", e);
+            ToolResult {
+                success: false,
+                data: None,
+                error: Some(e),
+            }
+        }
+    }
+}

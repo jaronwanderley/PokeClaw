@@ -956,59 +956,11 @@ mod desktop_commands {
         }
     }
 
-    /// Desktop mock for open_app. Simulates launching an app by package name
-    /// or well-known app name. Returns an error if app_name is empty.
+    /// Desktop real open_app. Launches an app by name or path.
     #[tauri::command]
     pub fn open_app(app_name: String) -> ToolResult {
-        log::info!("open_app (desktop mock): app_name='{}'", app_name);
-        if app_name.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("app_name parameter must not be empty".into()),
-            };
-        }
-        // Resolve common names like the Kotlin WELL_KNOWN_APPS map
-        let app_name_lower = app_name.to_lowercase();
-        let resolved_package = match app_name_lower.as_str() {
-            "whatsapp" => "com.whatsapp",
-            "telegram" => "org.telegram.messenger",
-            "messages" | "sms" => "com.google.android.apps.messaging",
-            "phone" | "dialer" => "com.google.android.dialer",
-            "chrome" | "browser" => "com.android.chrome",
-            "settings" => "com.android.settings",
-            "camera" => "com.android.camera",
-            "gmail" | "email" => "com.google.android.gm",
-            "maps" => "com.google.android.apps.maps",
-            "youtube" => "com.google.android.youtube",
-            "instagram" => "com.instagram.android",
-            "facebook" => "com.facebook.katana",
-            "twitter" | "x" => "com.twitter.android",
-            "tiktok" => "com.zhiliaoapp.musically",
-            "spotify" => "com.spotify.music",
-            "discord" => "com.discord",
-            "signal" => "org.thoughtcrime.securesms",
-            "slack" => "com.Slack",
-            "line" => "jp.naver.line.android",
-            "snapchat" => "com.snapchat.android",
-            "wechat" => "com.tencent.mm",
-            "kakao" => "com.kakao.talk",
-            "teams" => "com.microsoft.teams",
-            "zoom" => "us.zoom.videomeetings",
-            "netflix" => "com.netflix.mediaclient",
-            "calendar" => "com.google.android.calendar",
-            "clock" => "com.google.android.deskclock",
-            "calculator" => "com.google.android.calculator",
-            other => other, // Assume it's already a package name
-        };
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "message": format!("Opened app '{}' (package: {})", app_name, resolved_package),
-                "package": resolved_package,
-            })),
-            error: None,
-        }
+        log::info!("open_app: delegating to desktop::automation — app_name='{}'", app_name);
+        desktop::automation::do_open_app(&app_name)
     }
 
     /// Desktop real system_key. Delegates to desktop::automation for real OS-level key press.
@@ -1081,55 +1033,12 @@ mod desktop_commands {
         }
     }
 
-    /// Desktop mock for get_installed_apps. Returns a sample list of
-    /// installed apps. Supports optional filter matching against app name
-    /// and package name.
+    /// Desktop real get_installed_apps.
+    /// Enumerates currently running apps by checking open windows.
     #[tauri::command]
     pub fn get_installed_apps(filter: Option<String>) -> ToolResult {
-        log::info!("get_installed_apps (desktop mock): filter={:?}", filter);
-        let all_apps = serde_json::json!([
-            { "package_name": "com.whatsapp", "app_name": "WhatsApp", "is_system": false },
-            { "package_name": "org.telegram.messenger", "app_name": "Telegram", "is_system": false },
-            { "package_name": "com.google.android.apps.messaging", "app_name": "Messages", "is_system": true },
-            { "package_name": "com.google.android.dialer", "app_name": "Phone", "is_system": true },
-            { "package_name": "com.android.chrome", "app_name": "Chrome", "is_system": true },
-            { "package_name": "com.google.android.gms", "app_name": "Google Play Services", "is_system": true },
-            { "package_name": "com.instagram.android", "app_name": "Instagram", "is_system": false },
-            { "package_name": "com.spotify.music", "app_name": "Spotify", "is_system": false },
-        ]);
-        let filtered = if let Some(f) = filter {
-            if f.trim().is_empty() {
-                all_apps
-            } else {
-                let f_lower = f.to_lowercase();
-                let apps = all_apps.as_array().unwrap();
-                let matched: Vec<_> = apps
-                    .iter()
-                    .filter(|app| {
-                        let name = app
-                            .get("app_name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_lowercase();
-                        let pkg = app
-                            .get("package_name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_lowercase();
-                        name.contains(&f_lower) || pkg.contains(&f_lower)
-                    })
-                    .cloned()
-                    .collect();
-                serde_json::Value::Array(matched)
-            }
-        } else {
-            all_apps
-        };
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "apps": filtered })),
-            error: None,
-        }
+        log::info!("get_installed_apps: delegating to desktop::screen — filter={:?}", filter);
+        desktop::screen::do_get_installed_apps(filter.as_deref())
     }
 
     /// Desktop mock for make_call. Simulates opening the dialer with the

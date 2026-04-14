@@ -934,6 +934,8 @@ Format: `[date] [status] [test-id] description`
 [2026-04-10] [PASS]    Rel-s7  Stable-key in-place upgrade path verified locally: with the same release keystore, a higher-version signed build (`POKECLAW_VERSION_CODE=15`, `POKECLAW_VERSION_NAME=0.5.1-upgrade-test`) installed over the stable-signed `0.5.1` baseline via `adb install -r` and Android accepted the upgrade with no signature mismatch
 [2026-04-13] [PASS]    DK1   get_screen_info returns real window tree with titles/bounds (S03)
 [2026-04-13] [PASS]    DK2   find_node_info returns real window nodes matching search (S03)
+[2026-04-13] [PASS]    DK3   Window filtering: minimized windows are excluded from results (S03)
+[2026-04-13] [PASS]    DK4   JSON mapping: window bounds use correct [x1,y1][x2,y2] format (S03)
 [2026-04-10] [FIXED]   M1-a  Explicit in-app search tasks now use a generic guard/prompt hint: the agent cannot finish before it really types the query with `input_text`, and blocked finishes feed back a fresh screen-based node hint instead of an app-specific scripted route
 [2026-04-10] [PASS]    M8/M1-a  Cloud task `search youtube for lofi beats` → `open_app` → `input_text(node_id=...)` succeeds → `system_key(enter)` → `get_screen_info` → `finish`; completes in 6 rounds / 46.7K tokens, no budget stop, auto-return restores `ComposeChatActivity`
 [2026-04-10] [PASS]    M8-alt/M1-a  Alternate phrasing `search for lofi beats on youtube` follows the same generic path (`open_app` → `input_text(node_id=...)` → `system_key` → `get_screen_info` → `finish`) and also completes in 6 rounds / 47.5K tokens

@@ -134,8 +134,14 @@ impl ToolExecutor for DesktopToolExecutor {
                 let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("");
                 convert_tool_result(automation::do_system_key(key))
             }
-            "open_app" => self.mock_open_app(&params),
-            "get_installed_apps" => self.mock_get_installed_apps(&params),
+            "open_app" => {
+                let app_name = params.get("app_name").and_then(|v| v.as_str()).unwrap_or("");
+                convert_tool_result(automation::do_open_app(app_name))
+            }
+            "get_installed_apps" => {
+                let filter = params.get("filter").and_then(|v| v.as_str());
+                convert_tool_result(screen::do_get_installed_apps(filter))
+            }
             "take_screenshot" => {
                 let file_path = params.get("file_path").and_then(|v| v.as_str());
                 convert_tool_result(screen::do_take_screenshot(file_path))
@@ -254,35 +260,6 @@ impl ToolExecutor for DesktopToolExecutor {
 // ---------------------------------------------------------------------------
 
 impl DesktopToolExecutor {
-    fn mock_open_app(&self, params: &Value) -> ToolResult {
-        let app_name = params.get("app_name").and_then(|v| v.as_str()).unwrap_or("");
-        if app_name.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("app_name must not be empty".into()),
-            };
-        }
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Opened app '{}'", app_name) })),
-            error: None,
-        }
-    }
-
-    fn mock_get_installed_apps(&self, _params: &Value) -> ToolResult {
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "apps": [
-                    { "package_name": "com.whatsapp", "app_name": "WhatsApp" },
-                    { "package_name": "org.telegram.messenger", "app_name": "Telegram" },
-                ]
-            })),
-            error: None,
-        }
-    }
-
     fn mock_wait(&self, params: &Value) -> ToolResult {
         let ms = params.get("milliseconds").and_then(|v| v.as_u64()).unwrap_or(1000);
         ToolResult {

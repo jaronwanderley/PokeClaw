@@ -11,8 +11,81 @@ use enigo::{
     Direction::{Click, Press, Release},
     Enigo, Key, Keyboard, Mouse, Settings,
 };
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
+
+/// Launch an application by name or path.
+///
+/// On Windows, uses `cmd /C start`.
+pub fn do_open_app(app_name: &str) -> ToolResult {
+    log::info!("do_open_app: app_name='{}'", app_name);
+
+    if app_name.trim().is_empty() {
+        return ToolResult {
+            success: false,
+            data: None,
+            error: Some("app_name parameter must not be empty".into()),
+        };
+    }
+
+    let result = (|| -> Result<String, String> {
+        #[cfg(target_os = "windows")]
+        {
+            let status = Command::new("cmd")
+                .args(["/C", "start", "", app_name])
+                .status()
+                .map_err(|e| format!("Failed to execute start command: {}", e))?;
+
+            if status.success() {
+                Ok(format!("Started application: {}", app_name))
+            } else {
+                Err(format!("Start command exited with error: {}", status))
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let status = Command::new("open")
+                .args(["-a", app_name])
+                .status()
+                .map_err(|e| format!("Failed to execute open command: {}", e))?;
+
+            if status.success() {
+                Ok(format!("Opened application: {}", app_name))
+            } else {
+                Err(format!("Open command exited with error: {}", status))
+            }
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            Err("open_app is only implemented for Windows and macOS".into())
+        }
+    })();
+
+    match result {
+        Ok(msg) => {
+            log::info!("do_open_app: success — {}", msg);
+            ToolResult {
+                success: true,
+                data: Some(serde_json::json!({
+                    "message": msg,
+                    "app_name": app_name
+                })),
+                error: None,
+            }
+        }
+        Err(e) => {
+            log::error!("do_open_app: failed — {}", e);
+            ToolResult {
+                success: false,
+                data: None,
+                error: Some(e),
+            }
+        }
+    }
+}
 
 /// Simulate a mouse click (tap) at absolute screen coordinates (x, y).
 pub fn do_tap(x: i32, y: i32) -> ToolResult {
