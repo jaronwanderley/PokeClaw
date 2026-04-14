@@ -10,7 +10,7 @@ use tauri::{
 
 /// Re-export of desktop FFI types and model manager functions for integration tests.
 /// Only compiled for non-Android targets (same as the desktop module).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod _ffi_test_exports {
     pub use crate::desktop::ffi::{LitertEngine as LitertEngineShim, LitertError};
     pub use crate::desktop::model_manager::{list_models, models_dir};
@@ -20,7 +20,7 @@ pub mod _ffi_test_exports {
 // Desktop-only modules (FFI bindings for LiteRT-LM native inference)
 // ---------------------------------------------------------------------------
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod desktop;
 
 // ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ pub struct InferenceState {
     pub session_status: Mutex<SessionStatus>,
     /// Desktop-only: loaded LiteRT-LM engine for real inference.
     /// `None` if library not found (echo mock fallback) or not yet loaded.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub litert_engine: Arc<Mutex<Option<desktop::ffi::LitertEngine>>>,
 }
 
@@ -166,7 +166,7 @@ impl Default for InferenceState {
         Self {
             active_session: Mutex::new(None),
             session_status: Mutex::new(SessionStatus::Idle),
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             litert_engine: Arc::new(Mutex::new(None)),
         }
     }
@@ -209,7 +209,7 @@ mod session_impl {
 
     /// Try to discover the LitertEngine shared library on the system.
     /// Returns the first path that exists, or None.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn find_litertlm_library() -> Option<std::path::PathBuf> {
         let candidates = [
             // Next to the executable (most common for Tauri apps)
@@ -279,7 +279,15 @@ mod session_impl {
             // Kotlin IPC will be wired in the next slice
         }
 
-        #[cfg(not(target_os = "android"))]
+        #[cfg(target_os = "ios")]
+        {
+            log::info!(
+                "start_session (iOS): would invoke Swift engine init — session_id={}",
+                session_id
+            );
+        }
+
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             // Try to load the real LiteRT-LM engine via FFI.
             // If the shared library is not found, fall back to echo mock.
@@ -398,7 +406,7 @@ mod session_impl {
         );
 
         // Drop the LiteRT-LM engine if present (desktop only)
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let mut litert = state.litert_engine.lock().map_err(|e| e.to_string())?;
             if litert.is_some() {
@@ -437,7 +445,13 @@ mod session_impl {
             Ok(format!("Android response for message of length {}", message.len()))
         }
 
-        #[cfg(not(target_os = "android"))]
+        #[cfg(target_os = "ios")]
+        {
+            log::info!("send_message (iOS): would invoke Swift inference — message_len={}", message.len());
+            Ok(format!("iOS response for message of length {}", message.len()))
+        }
+
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             // Check if we have a real engine
             let maybe_engine_arc = {
@@ -467,7 +481,7 @@ mod session_impl {
     /// If a real LiteRT-LM engine is loaded, creates a conversation and
     /// streams tokens through the callback. If no engine is loaded (echo mock
     /// fallback), streams a word-by-word echo response.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub async fn do_send_message_streaming(
         state: &InferenceState,
         message: String,
@@ -513,7 +527,7 @@ mod session_impl {
     /// Creates a new conversation on the shared engine, calls
     /// `send_message_streaming` (which blocks on the C++ callback thread),
     /// and forwards each token batch as a `StreamEvent::TokenBatch`.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn do_stream_real_inference(
         engine_arc: Arc<Mutex<Option<desktop::ffi::LitertEngine>>>,
         message: String,
@@ -608,7 +622,7 @@ mod session_impl {
     }
 
     /// Echo mock streaming — word-by-word with 80ms delays.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn do_stream_echo_mock(
         message: String,
         channel: &tauri::ipc::Channel<StreamEvent>,
@@ -723,10 +737,52 @@ mod android_commands {
 }
 
 // ---------------------------------------------------------------------------
-// Desktop command wrappers (registered only on non-Android)
+// iOS command wrappers (registered only on iOS)
 // ---------------------------------------------------------------------------
 
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "ios")]
+mod ios_commands {
+    use super::*;
+
+    #[tauri::command]
+    pub fn start_session(
+        state: State<'_, InferenceState>,
+        model_path: String,
+        prefer_gpu: bool,
+    ) -> Result<String, String> {
+        session_impl::do_start_session(&state, model_path, prefer_gpu)
+    }
+
+    #[tauri::command]
+    pub fn stop_session(state: State<'_, InferenceState>) -> Result<(), String> {
+        session_impl::do_stop_session(&state)
+    }
+
+    #[tauri::command]
+    pub fn send_message(
+        state: State<'_, InferenceState>,
+        message: String,
+    ) -> Result<String, String> {
+        session_impl::do_send_message(&state, message)
+    }
+
+    #[tauri::command]
+    pub fn get_session_status(state: State<'_, InferenceState>) -> Result<SessionStatus, String> {
+        session_impl::do_get_session_status(&state)
+    }
+
+    #[tauri::command]
+    pub fn chat(message: String) -> String {
+        log::info!("chat command received: {}", message);
+        format!("Echo: {}", message)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Desktop command wrappers (registered only on desktop)
+// ---------------------------------------------------------------------------
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_commands {
     use super::*;
 
@@ -1040,11 +1096,16 @@ mod desktop_commands {
 // ---------------------------------------------------------------------------
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
+    #[cfg(target_os = "ios")]
+    tauri::ios_plugin_binding!(init_plugin_pokeclaw);
+
     let builder = Builder::new("pokeclaw");
 
     let builder = builder
         .setup(|app, _api| {
             app.manage(InferenceState::default());
+            #[cfg(target_os = "ios")]
+            _api.register_ios_plugin(init_plugin_pokeclaw)?;
             #[cfg(target_os = "android")]
             _api.register_android_plugin("io.agents.pokeclaw", "PokeclawPlugin")?;
             Ok(())
@@ -1060,7 +1121,17 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             android_commands::chat,
         ]);
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    let builder = builder
+        .invoke_handler(tauri::generate_handler![
+            ios_commands::start_session,
+            ios_commands::stop_session,
+            ios_commands::send_message,
+            ios_commands::get_session_status,
+            ios_commands::chat,
+        ]);
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
             desktop_commands::start_session,
             desktop_commands::stop_session,
