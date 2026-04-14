@@ -1081,6 +1081,35 @@ mod desktop_commands {
             },
         }
     }
+
+    // -----------------------------------------------------------------
+    // Knowledge Base desktop commands
+    // -----------------------------------------------------------------
+
+    #[tauri::command]
+    pub fn kb_write(path: String, content: String) -> ToolResult {
+        desktop::kb::do_kb_write(&path, &content)
+    }
+
+    #[tauri::command]
+    pub fn kb_read(path: String) -> ToolResult {
+        desktop::kb::do_kb_read(&path)
+    }
+
+    #[tauri::command]
+    pub fn kb_append(path: String, content: String) -> ToolResult {
+        desktop::kb::do_kb_append(&path, &content)
+    }
+
+    #[tauri::command]
+    pub fn kb_search(query: String) -> ToolResult {
+        desktop::kb::do_kb_search(&query)
+    }
+
+    #[tauri::command]
+    pub fn kb_add_todo(text: String) -> ToolResult {
+        desktop::kb::do_kb_add_todo(&text)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1163,11 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::get_installed_apps,
             desktop_commands::make_call,
             desktop_commands::open_permission_settings,
+            desktop_commands::kb_write,
+            desktop_commands::kb_read,
+            desktop_commands::kb_append,
+            desktop_commands::kb_search,
+            desktop_commands::kb_add_todo,
         ]);
 
     builder.build()

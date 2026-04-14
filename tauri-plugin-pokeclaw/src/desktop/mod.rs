@@ -5,3 +5,4 @@ pub mod model_manager;
 pub mod automation;
 pub mod system;
 pub mod screen;
+pub mod kb;

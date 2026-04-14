@@ -9,7 +9,7 @@ use serde_json::Value;
 // Desktop real-OS imports (gated same as DesktopToolExecutor)
 // ---------------------------------------------------------------------------
 #[cfg(not(target_os = "android"))]
-use tauri_plugin_pokeclaw::desktop::{automation, system, screen};
+use tauri_plugin_pokeclaw::desktop::{automation, system, screen, kb};
 
 // ---------------------------------------------------------------------------
 // ToolResult — mirrors plugin ToolResult for agent-internal use
@@ -171,11 +171,28 @@ impl ToolExecutor for DesktopToolExecutor {
             "get_notifications" => self.mock_get_notifications(),
             "make_call" => self.mock_make_call(&params),
             "finish" => self.mock_finish(&params),
-            "kb_write" => self.mock_kb_write(&params),
-            "kb_read" => self.mock_kb_read(&params),
-            "kb_search" => self.mock_kb_search(&params),
-            "kb_append" => self.mock_kb_append(&params),
-            "kb_add_todo" => self.mock_kb_add_todo(&params),
+            "kb_write" => {
+                let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                convert_tool_result(kb::do_kb_write(path, content))
+            }
+            "kb_read" => {
+                let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                convert_tool_result(kb::do_kb_read(path))
+            }
+            "kb_search" => {
+                let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                convert_tool_result(kb::do_kb_search(query))
+            }
+            "kb_append" => {
+                let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                convert_tool_result(kb::do_kb_append(path, content))
+            }
+            "kb_add_todo" => {
+                let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                convert_tool_result(kb::do_kb_add_todo(text))
+            }
 
             // --- Mobile-only tools (real OS on desktop) ---
             "tap" => {
@@ -323,51 +340,6 @@ impl DesktopToolExecutor {
         ToolResult {
             success: true,
             data: Some(serde_json::json!({ "result": result })),
-            error: None,
-        }
-    }
-
-    fn mock_kb_write(&self, params: &Value) -> ToolResult {
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Written to '{}'", path) })),
-            error: None,
-        }
-    }
-
-    fn mock_kb_read(&self, params: &Value) -> ToolResult {
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "content": format!("Mock content of '{}'", path) })),
-            error: None,
-        }
-    }
-
-    fn mock_kb_search(&self, params: &Value) -> ToolResult {
-        let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "results": [format!("Found notes matching '{}'", query)] })),
-            error: None,
-        }
-    }
-
-    fn mock_kb_append(&self, params: &Value) -> ToolResult {
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Appended to '{}'", path) })),
-            error: None,
-        }
-    }
-
-    fn mock_kb_add_todo(&self, params: &Value) -> ToolResult {
-        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Added todo: '{}'", text) })),
             error: None,
         }
     }
@@ -585,27 +557,47 @@ mod tests {
         assert!(result.success);
     }
 
-    // --- KB tool mocks ---
+    // --- KB tool tests ---
 
     #[test]
     fn test_kb_write() {
+        let kb_dir = std::env::temp_dir().join("pokeclaw_test_kb_write");
+        let _ = std::fs::remove_dir_all(&kb_dir);
+        std::env::set_var("POKECLAW_KB_DIR", &kb_dir);
+        
         let exec = executor();
-        let result = exec.execute("kb_write", json!({ "path": "notes/test.md", "content": "Hello" }));
+        let result = exec.execute("kb_write", json!({ "path": "test.md", "content": "Hello" }));
         assert!(result.success);
+        assert!(kb_dir.join("test.md").exists());
     }
 
     #[test]
     fn test_kb_read() {
+        let kb_dir = std::env::temp_dir().join("pokeclaw_test_kb_read");
+        let _ = std::fs::remove_dir_all(&kb_dir);
+        std::fs::create_dir_all(&kb_dir).unwrap();
+        std::fs::write(kb_dir.join("test.md"), "Hello read").unwrap();
+        std::env::set_var("POKECLAW_KB_DIR", &kb_dir);
+
         let exec = executor();
-        let result = exec.execute("kb_read", json!({ "path": "notes/test.md" }));
+        let result = exec.execute("kb_read", json!({ "path": "test.md" }));
         assert!(result.success);
+        assert_eq!(result.data.unwrap()["content"], "Hello read");
     }
 
     #[test]
     fn test_kb_search() {
+        let kb_dir = std::env::temp_dir().join("pokeclaw_test_kb_search");
+        let _ = std::fs::remove_dir_all(&kb_dir);
+        std::fs::create_dir_all(&kb_dir).unwrap();
+        std::fs::write(kb_dir.join("note.md"), "Project X secret").unwrap();
+        std::env::set_var("POKECLAW_KB_DIR", &kb_dir);
+
         let exec = executor();
-        let result = exec.execute("kb_search", json!({ "query": "meeting" }));
+        let result = exec.execute("kb_search", json!({ "query": "project x" }));
         assert!(result.success);
+        let results = result.data.unwrap()["results"].as_array().unwrap().clone();
+        assert!(!results.is_empty());
     }
 
     // --- Mobile tool mocks ---
@@ -728,6 +720,10 @@ mod tests {
 
     #[test]
     fn test_execute_all_28_tools_succeed_with_valid_params() {
+        let kb_dir = std::env::temp_dir().join("pokeclaw_test_all_tools");
+        let _ = std::fs::remove_dir_all(&kb_dir);
+        std::env::set_var("POKECLAW_KB_DIR", &kb_dir);
+
         let exec = executor();
         let all_tools_with_params = [
             ("get_screen_info", json!({})),

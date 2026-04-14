@@ -5420,6 +5420,7 @@ dependencies = [
  "sysinfo",
  "tauri",
  "tauri-plugin",
+ "tempfile",
  "tokio",
  "xcap",
 ]
