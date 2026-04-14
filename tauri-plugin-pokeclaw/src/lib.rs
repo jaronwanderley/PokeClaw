@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use tauri::{
     plugin::{Builder, TauriPlugin},
-    Runtime, State,
+    Manager, Runtime, State,
 };
 
 // ---------------------------------------------------------------------------
@@ -1023,12 +1023,16 @@ mod desktop_commands {
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     let builder = Builder::new("pokeclaw");
 
+    let builder = builder
+        .setup(|app, _api| {
+            app.manage(InferenceState::default());
+            #[cfg(target_os = "android")]
+            _api.register_android_plugin("io.agents.pokeclaw", "PokeclawPlugin")?;
+            Ok(())
+        });
+
     #[cfg(target_os = "android")]
     let builder = builder
-        .setup(|_app, api| {
-            api.register_android_plugin("io.agents.pokeclaw", "PokeclawPlugin")?;
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             android_commands::start_session,
             android_commands::stop_session,
