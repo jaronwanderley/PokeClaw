@@ -418,12 +418,11 @@ mod session_impl {
         Ok(())
     }
 
-    #[allow(dead_code)] // Used by android_commands; desktop uses do_send_message_streaming
     pub fn do_send_message(
         state: &InferenceState,
         message: String,
     ) -> Result<String, String> {
-        log::info!("send_message: message='{}'", message);
+        log::info!("send_message: message_len={}", message.len());
 
         {
             let session = state.active_session.lock().map_err(|e| e.to_string())?;
@@ -434,14 +433,32 @@ mod session_impl {
 
         #[cfg(target_os = "android")]
         {
-            log::info!("send_message (Android): would invoke Kotlin inference — message='{}'", message);
-            Ok(format!("Android response for: {}", message))
+            log::info!("send_message (Android): would invoke Kotlin inference — message_len={}", message.len());
+            Ok(format!("Android response for message of length {}", message.len()))
         }
 
         #[cfg(not(target_os = "android"))]
         {
-            log::info!("send_message (desktop mock): echoing message='{}'", message);
-            Ok(format!("Echo: {}", message))
+            // Check if we have a real engine
+            let maybe_engine_arc = {
+                let litert = state.litert_engine.lock().map_err(|e| e.to_string())?;
+                match litert.as_ref() {
+                    Some(_) => Some(Arc::clone(&state.litert_engine)),
+                    None => None,
+                }
+            };
+
+            if let Some(engine_arc) = maybe_engine_arc {
+                // Real LiteRT-LM inference path
+                log::info!("do_send_message (desktop): using real LiteRT-LM engine");
+                let litert = engine_arc.lock().map_err(|e| e.to_string())?;
+                let engine = litert.as_ref().ok_or("Engine disappeared")?;
+                let session = engine.create_conversation().map_err(|e| e.to_string())?;
+                session.send_message(&message).map_err(|e| e.to_string())
+            } else {
+                log::info!("send_message (desktop mock): echoing message_len={}", message.len());
+                Ok(format!("Echo: {}", message))
+            }
         }
     }
 
@@ -660,6 +677,8 @@ mod session_impl {
         Ok(status.clone())
     }
 }
+
+pub use session_impl::do_send_message;
 
 // ---------------------------------------------------------------------------
 // Android command wrappers (registered only on Android)

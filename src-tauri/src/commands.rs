@@ -7,8 +7,10 @@ use std::time::Instant;
 use log::{error, info, warn};
 use serde::Deserialize;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use std::sync::Arc;
+
+use tauri_plugin_pokeclaw::InferenceState;
 
 use crate::agent::config::AgentConfig;
 use crate::agent::guards::GuardRegistry;
@@ -304,7 +306,9 @@ pub fn set_llm_provider_type(state: State<'_, AgentState>, provider_type: String
 /// or if the OpenAI API key has not been set.
 #[tauri::command]
 pub async fn start_task(
+    app: AppHandle,
     state: State<'_, AgentState>,
+    _inference_state: State<'_, InferenceState>,
     task: String,
     on_event: Channel<TaskEvent>,
 ) -> Result<(), String> {
@@ -601,6 +605,7 @@ pub async fn start_task(
                         });
 
                         // Fall through to full agent loop with fallback_goal
+                        let app_clone = app.clone();
                         let provider: Box<dyn LlmProvider> = match provider_type {
                             LlmProviderType::OpenAi => {
                                 let key = api_key.as_ref().expect("OpenAI key validated above");
@@ -611,7 +616,10 @@ pub async fn start_task(
                                 Box::new(AnthropicProvider::new(key.clone(), model_name.clone()))
                             }
                             LlmProviderType::Local => {
-                                Box::new(LocalProvider::new_mock())
+                                Box::new(LocalProvider::with_fn(Arc::new(move |prompt| {
+                                    let state = app_clone.state::<InferenceState>();
+                                    tauri_plugin_pokeclaw::do_send_message(&state, prompt)
+                                })))
                             }
                         };
                         let agent_executor = DesktopToolExecutor::new();
@@ -653,6 +661,7 @@ pub async fn start_task(
         Route::AgentLoop { task: agent_task } => {
             info!("start_task: AgentLoop — spawning full agent loop");
 
+            let app_clone = app.clone();
             let provider: Box<dyn LlmProvider> = match provider_type {
                 LlmProviderType::OpenAi => {
                     let key = api_key.as_ref().expect("OpenAI key validated above");
@@ -663,7 +672,10 @@ pub async fn start_task(
                     Box::new(AnthropicProvider::new(key.clone(), model_name.clone()))
                 }
                 LlmProviderType::Local => {
-                    Box::new(LocalProvider::new_mock())
+                    Box::new(LocalProvider::with_fn(Arc::new(move |prompt| {
+                        let state = app_clone.state::<InferenceState>();
+                        tauri_plugin_pokeclaw::do_send_message(&state, prompt)
+                    })))
                 }
             };
 

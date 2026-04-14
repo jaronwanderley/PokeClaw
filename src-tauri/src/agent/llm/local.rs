@@ -15,6 +15,7 @@
 //! 3. ```tool_call\n...\n``` - Fenced code blocks
 //! 4. `functioncall: {...}` - Legacy prefix format
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use log::{debug, info, warn};
@@ -79,7 +80,7 @@ fn next_tool_call_id() -> String {
 /// For desktop/testing, the closure returns mock responses.
 /// For Android, the closure wraps the LiteRT-LM plugin IPC call.
 pub struct LocalProvider {
-    call_fn: Box<dyn Fn(String) -> Result<String, String> + Send + Sync>,
+    call_fn: Arc<dyn Fn(String) -> Result<String, String> + Send + Sync>,
 }
 
 impl LocalProvider {
@@ -88,7 +89,7 @@ impl LocalProvider {
     /// The closure receives the full serialized prompt string and returns
     /// the raw model output text (which may contain tool call markup).
     pub fn with_fn(
-        call_fn: Box<dyn Fn(String) -> Result<String, String> + Send + Sync>,
+        call_fn: Arc<dyn Fn(String) -> Result<String, String> + Send + Sync>,
     ) -> Self {
         info!("LocalProvider created with custom call_fn");
         Self { call_fn }
@@ -100,7 +101,7 @@ impl LocalProvider {
     pub fn new_mock() -> Self {
         info!("LocalProvider created with mock response");
         Self {
-            call_fn: Box::new(|_input| {
+            call_fn: Arc::new(|_input| {
                 Ok("I'm a mock local LLM response.".to_string())
             }),
         }
@@ -109,7 +110,7 @@ impl LocalProvider {
     /// Create a mock provider that returns a specific response string.
     pub fn new_mock_with_response(response: String) -> Self {
         Self {
-            call_fn: Box::new(move |_input| Ok(response.clone())),
+            call_fn: Arc::new(move |_input| Ok(response.clone())),
         }
     }
 }
@@ -516,11 +517,12 @@ impl LlmProvider for LocalProvider {
         let prompt = serialize_messages(&messages);
         debug!("LocalProvider: serialized prompt ({} chars)", prompt.len());
 
-        // Call the injected closure directly.
-        // The closure encapsulates IPC (Android) or mock (desktop) and handles its own
-        // blocking behavior. The async context allows other tasks to progress while
-        // this runs, but the closure itself runs synchronously on the current thread.
-        let result = (self.call_fn)(prompt);
+        // Call the injected closure in a blocking task to avoid blocking the async executor.
+        // The closure encapsulates IPC (Android) or real inference (desktop).
+        let call_fn = Arc::clone(&self.call_fn);
+        let result = tokio::task::spawn_blocking(move || (call_fn)(prompt))
+            .await
+            .map_err(|e| LlmError::ApiError(format!("Inference task panicked: {}", e)))?;
 
         let response_text = result.map_err(|e| {
             warn!("LocalProvider: call_fn error: {}", e);
@@ -954,7 +956,7 @@ mod tests {
     #[tokio::test]
     async fn test_local_provider_custom_fn() {
         reset_id_counter();
-        let provider = LocalProvider::with_fn(Box::new(|input| {
+        let provider = LocalProvider::with_fn(Arc::new(|input: String| {
             if input.contains("tap") {
                 Ok(r#"__{"name": "tap", "arguments": {"x": 50, "y": 75}}__"#.to_string())
             } else {
@@ -969,7 +971,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_provider_call_fn_error() {
-        let provider = LocalProvider::with_fn(Box::new(|_input| {
+        let provider = LocalProvider::with_fn(Arc::new(|_input: String| {
             Err("Model not loaded".to_string())
         }));
         let messages = vec![ChatMessage::User("Hello".to_string())];
