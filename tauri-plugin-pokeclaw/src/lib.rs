@@ -1088,22 +1088,11 @@ mod desktop_commands {
         }
     }
 
-    /// Desktop mock for take_screenshot. Returns a mock file path for
-    /// the captured screenshot.
+    /// Desktop real take_screenshot.
+    /// Captures a screenshot of the primary monitor and saves it to the specified path.
     #[tauri::command]
     pub fn take_screenshot(file_path: Option<String>) -> ToolResult {
-        let path = file_path.unwrap_or_else(|| "/tmp/screenshots/screenshot_mock.png".into());
-        log::info!("take_screenshot (desktop mock): file_path='{}'", path);
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "message": format!("Screenshot saved to {}", path),
-                "file_path": path,
-                "width": 1080,
-                "height": 2400,
-            })),
-            error: None,
-        }
+        desktop::screen::do_take_screenshot(file_path.as_deref())
     }
 
     /// Desktop real clipboard. Delegates to desktop::system for real OS clipboard access.
