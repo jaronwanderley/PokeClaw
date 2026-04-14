@@ -146,7 +146,12 @@ impl ToolExecutor for DesktopToolExecutor {
                 let file_path = params.get("file_path").and_then(|v| v.as_str());
                 convert_tool_result(screen::do_take_screenshot(file_path))
             }
-            "wait" => self.mock_wait(&params),
+            "wait" => {
+                let ms = params.get("milliseconds")
+                    .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+                    .unwrap_or(1000) as i32;
+                convert_tool_result(automation::do_wait(ms))
+            }
             "repeat_actions" => self.mock_repeat_actions(&params),
             "clipboard" => {
                 let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("get");
@@ -196,23 +201,23 @@ impl ToolExecutor for DesktopToolExecutor {
 
             // --- Mobile-only tools (real OS on desktop) ---
             "tap" => {
-                let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let x = params.get("x").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
+                let y = params.get("y").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
                 convert_tool_result(automation::do_tap(x, y))
             }
             "tap_node" => self.mock_tap_node(&params),
             "long_press" => {
-                let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let duration_ms = params.get("duration_ms").and_then(|v| v.as_i64()).map(|d| d as i32);
+                let x = params.get("x").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
+                let y = params.get("y").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
+                let duration_ms = params.get("duration_ms").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).map(|d| d as i32);
                 convert_tool_result(automation::do_long_press(x, y, duration_ms))
             }
             "swipe" => {
-                let sx = params.get("start_x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let sy = params.get("start_y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let ex = params.get("end_x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let ey = params.get("end_y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let duration_ms = params.get("duration_ms").and_then(|v| v.as_i64()).map(|d| d as i32);
+                let sx = params.get("start_x").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
+                let sy = params.get("start_y").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
+                let ex = params.get("end_x").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
+                let ey = params.get("end_y").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0) as i32;
+                let duration_ms = params.get("duration_ms").and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).map(|d| d as i32);
                 convert_tool_result(automation::do_swipe(sx, sy, ex, ey, duration_ms))
             }
             "scroll_to_find" => self.mock_scroll_to_find(&params),
@@ -277,15 +282,6 @@ impl ToolExecutor for DesktopToolExecutor {
 // ---------------------------------------------------------------------------
 
 impl DesktopToolExecutor {
-    fn mock_wait(&self, params: &Value) -> ToolResult {
-        let ms = params.get("milliseconds").and_then(|v| v.as_u64()).unwrap_or(1000);
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Waited {}ms", ms) })),
-            error: None,
-        }
-    }
-
     fn mock_repeat_actions(&self, params: &Value) -> ToolResult {
         let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1);
         ToolResult {
@@ -295,43 +291,27 @@ impl DesktopToolExecutor {
         }
     }
 
-    fn mock_send_file(&self, params: &Value) -> ToolResult {
-        let contact = params.get("contact").and_then(|v| v.as_str()).unwrap_or("");
-        let app = params.get("app").and_then(|v| v.as_str()).unwrap_or("");
+    fn mock_send_file(&self, _params: &Value) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "message": format!("Sent file to '{}' via '{}'", contact, app)
-            })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("send_file is not supported on desktop.".into()),
         }
     }
 
     fn mock_get_notifications(&self) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "notifications": [
-                    { "package": "com.whatsapp", "text": "John: Hey!" },
-                ]
-            })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("get_notifications is not supported on desktop.".into()),
         }
     }
 
-    fn mock_make_call(&self, params: &Value) -> ToolResult {
-        let contact = params.get("contact").and_then(|v| v.as_str()).unwrap_or("");
-        if contact.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("contact must not be empty".into()),
-            };
-        }
+    fn mock_make_call(&self, _params: &Value) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Calling '{}'", contact) })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("make_call is not supported on desktop.".into()),
         }
     }
 
@@ -346,82 +326,43 @@ impl DesktopToolExecutor {
 
     // --- Mobile tool mocks ---
 
-    fn mock_tap_node(&self, params: &Value) -> ToolResult {
-        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("No identifier provided (text, resource_id, or description required)".into()),
-            };
-        }
+    fn mock_tap_node(&self, _params: &Value) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Tapped node with text '{}' at (540,160)", text) })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("tap_node is not supported on desktop. Use coordinate-based tap instead.".into()),
         }
     }
 
-    fn mock_scroll_to_find(&self, params: &Value) -> ToolResult {
-        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text must not be empty".into()),
-            };
-        }
+    fn mock_scroll_to_find(&self, _params: &Value) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Found '{}' after scrolling", text) })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("scroll_to_find is not supported on desktop. Use manual scrolling and find_node_info instead.".into()),
         }
     }
 
-    fn mock_find_and_tap(&self, params: &Value) -> ToolResult {
-        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text must not be empty".into()),
-            };
-        }
+    fn mock_find_and_tap(&self, _params: &Value) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Found and tapped '{}'", text) })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("find_and_tap is not supported on desktop. Use find_node_info followed by tap instead.".into()),
         }
     }
 
-    fn mock_send_message(&self, params: &Value) -> ToolResult {
-        let contact = params.get("contact").and_then(|v| v.as_str()).unwrap_or("");
-        let message = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
-        let app = params.get("app").and_then(|v| v.as_str()).unwrap_or("");
-        if contact.trim().is_empty() || message.trim().is_empty() || app.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("contact, message, and app must not be empty".into()),
-            };
-        }
+    fn mock_send_message(&self, _params: &Value) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "message": format!("Sent '{}' to {} via {}", message, contact, app)
-            })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("send_message is not supported on desktop. Use manual app automation if needed.".into()),
         }
     }
 
-    fn mock_auto_reply(&self, params: &Value) -> ToolResult {
-        let notification_id = params.get("notification_id").and_then(|v| v.as_str()).unwrap_or("");
+    fn mock_auto_reply(&self, _params: &Value) -> ToolResult {
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "message": format!("Auto-replied to notification '{}'", notification_id)
-            })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("auto_reply is not supported on desktop.".into()),
         }
     }
 }
@@ -533,14 +474,16 @@ mod tests {
     fn test_get_notifications() {
         let exec = executor();
         let result = exec.execute("get_notifications", json!({}));
-        assert!(result.success);
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("not supported"));
     }
 
     #[test]
     fn test_make_call_valid() {
         let exec = executor();
         let result = exec.execute("make_call", json!({ "contact": "John" }));
-        assert!(result.success);
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("not supported"));
     }
 
     #[test]
@@ -631,7 +574,8 @@ mod tests {
         let result = exec.execute("send_message", json!({
             "contact": "John", "message": "Hi!", "app": "whatsapp"
         }));
-        assert!(result.success);
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("not supported"));
     }
 
     #[test]
@@ -719,13 +663,13 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_all_28_tools_succeed_with_valid_params() {
+    fn test_execute_all_28_tools() {
         let kb_dir = std::env::temp_dir().join("pokeclaw_test_all_tools");
         let _ = std::fs::remove_dir_all(&kb_dir);
         std::env::set_var("POKECLAW_KB_DIR", &kb_dir);
 
         let exec = executor();
-        let all_tools_with_params = [
+        let tools_expected_success = [
             ("get_screen_info", json!({})),
             ("find_node_info", json!({ "text": "test" })),
             ("input_text", json!({ "text": "hello" })),
@@ -733,13 +677,10 @@ mod tests {
             ("open_app", json!({ "app_name": "Chrome" })),
             ("get_installed_apps", json!({})),
             ("take_screenshot", json!({})),
-            ("wait", json!({ "milliseconds": 100 })),
+            ("wait", json!({ "milliseconds": 10 })),
             ("repeat_actions", json!({ "actions": "[]", "count": 1 })),
             ("clipboard", json!({ "action": "get" })),
-            ("send_file", json!({ "contact": "A", "file_path": "/tmp/f", "app": "whatsapp" })),
             ("get_device_info", json!({})),
-            ("get_notifications", json!({})),
-            ("make_call", json!({ "contact": "John" })),
             ("finish", json!({ "result": "done" })),
             ("kb_write", json!({ "path": "a.md", "content": "hi" })),
             ("kb_read", json!({ "path": "a.md" })),
@@ -747,19 +688,32 @@ mod tests {
             ("kb_append", json!({ "path": "a.md", "content": "more" })),
             ("kb_add_todo", json!({ "text": "todo" })),
             ("tap", json!({ "x": 100, "y": 200 })),
-            ("tap_node", json!({ "text": "button" })),
             ("long_press", json!({ "x": 100, "y": 200 })),
             ("swipe", json!({ "start_x": 500, "start_y": 1000, "end_x": 500, "end_y": 200 })),
+        ];
+
+        let tools_expected_failure = [
+            ("send_file", json!({ "contact": "A", "file_path": "/tmp/f", "app": "whatsapp" })),
+            ("get_notifications", json!({})),
+            ("make_call", json!({ "contact": "John" })),
+            ("tap_node", json!({ "text": "button" })),
             ("scroll_to_find", json!({ "text": "target" })),
             ("find_and_tap", json!({ "text": "button" })),
             ("send_message", json!({ "contact": "A", "message": "Hi", "app": "whatsapp" })),
             ("auto_reply", json!({ "notification_id": "n1" })),
         ];
 
-        for (name, params) in &all_tools_with_params {
+        for (name, params) in &tools_expected_success {
             let result = exec.execute(name, params.clone());
-            assert!(result.success, "Tool '{}' should succeed with valid params, got error: {:?}", name, result.error);
+            assert!(result.success, "Tool '{}' should succeed, got error: {:?}", name, result.error);
         }
-        assert_eq!(all_tools_with_params.len(), 28);
+
+        for (name, params) in &tools_expected_failure {
+            let result = exec.execute(name, params.clone());
+            assert!(!result.success, "Tool '{}' should fail (not supported on desktop)", name);
+            assert!(result.error.unwrap().contains("not supported"), "Tool '{}' error should mention not supported", name);
+        }
+
+        assert_eq!(tools_expected_success.len() + tools_expected_failure.len(), 28);
     }
 }

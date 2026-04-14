@@ -412,3 +412,24 @@ pub fn do_system_key(action: &str) -> ToolResult {
         }
     }
 }
+
+/// Wait for a specified number of milliseconds.
+pub fn do_wait(milliseconds: i32) -> ToolResult {
+    log::info!("do_wait: {}ms", milliseconds);
+    if milliseconds < 0 {
+        return ToolResult {
+            success: false,
+            data: None,
+            error: Some("milliseconds must be non-negative".into()),
+        };
+    }
+    thread::sleep(Duration::from_millis(milliseconds as u64));
+    ToolResult {
+        success: true,
+        data: Some(serde_json::json!({
+            "message": format!("Waited {}ms", milliseconds),
+            "milliseconds": milliseconds
+        })),
+        error: None,
+    }
+}

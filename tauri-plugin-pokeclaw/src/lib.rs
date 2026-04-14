@@ -836,22 +836,14 @@ mod desktop_commands {
         desktop::automation::do_long_press(x, y, duration_ms)
     }
 
-    /// Desktop mock for tap_node. Simulates tapping an accessibility node by ID.
-    /// Returns an error if node_id is empty.
+    /// Desktop mock for tap_node. Not supported on desktop.
     #[tauri::command]
-    pub fn tap_node(node_id: String) -> ToolResult {
-        log::info!("tap_node (desktop mock): node_id='{}'", node_id);
-        if node_id.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("node_id must not be empty".into()),
-            };
-        }
+    pub fn tap_node(_node_id: String) -> ToolResult {
+        log::info!("tap_node (desktop): Not supported");
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Tapped node {} at (540,160)", node_id) })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("tap_node is not supported on desktop. Use coordinate-based tap instead.".into()),
         }
     }
 
@@ -865,51 +857,25 @@ mod desktop_commands {
         desktop::automation::do_input_text(&text, node_id.as_deref(), clear_first)
     }
 
-    /// Desktop mock for scroll_to_find. Simulates scrolling to find an element
-    /// matching the given text. Returns an error if text is empty.
+    /// Desktop mock for scroll_to_find. Not supported on desktop.
     #[tauri::command]
-    pub fn scroll_to_find(text: String, direction: Option<String>, max_scrolls: Option<i32>) -> ToolResult {
-        let dir = direction.unwrap_or_else(|| "down".into());
-        let max = max_scrolls.unwrap_or(5);
-        log::info!(
-            "scroll_to_find (desktop mock): text='{}', direction='{}', max_scrolls={}",
-            text, dir, max
-        );
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text parameter must not be empty".into()),
-            };
-        }
+    pub fn scroll_to_find(_text: String, _direction: Option<String>, _max_scrolls: Option<i32>) -> ToolResult {
+        log::info!("scroll_to_find (desktop): Not supported");
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Found element with text '{}' after scrolling {} (max_scrolls={})", text, dir, max) })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("scroll_to_find is not supported on desktop. Use manual scrolling and find_node_info instead.".into()),
         }
     }
 
-    /// Desktop mock for find_and_tap. Simulates finding and tapping an element
-    /// matching the given text. Returns an error if text is empty.
+    /// Desktop mock for find_and_tap. Not supported on desktop.
     #[tauri::command]
-    pub fn find_and_tap(text: String, direction: Option<String>, max_scrolls: Option<i32>) -> ToolResult {
-        let dir = direction.unwrap_or_else(|| "down".into());
-        let max = max_scrolls.unwrap_or(5);
-        log::info!(
-            "find_and_tap (desktop mock): text='{}', direction='{}', max_scrolls={}",
-            text, dir, max
-        );
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text parameter must not be empty".into()),
-            };
-        }
+    pub fn find_and_tap(_text: String, _direction: Option<String>, _max_scrolls: Option<i32>) -> ToolResult {
+        log::info!("find_and_tap (desktop): Not supported");
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "message": format!("Found '{}' and tapped at (270,280) (direction={}, max_scrolls={})", text, dir, max) })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("find_and_tap is not supported on desktop. Use find_node_info followed by tap instead.".into()),
         }
     }
 
@@ -917,42 +883,14 @@ mod desktop_commands {
     // New tool desktop mocks (T04 — S03)
     // -----------------------------------------------------------------
 
-    /// Desktop mock for get_notifications. Returns a sample list of
-    /// notification objects matching the format produced by
-    /// PokeNotificationListener.getActiveNotificationsList().
+    /// Desktop mock for get_notifications. Not supported on desktop.
     #[tauri::command]
     pub fn get_notifications() -> ToolResult {
-        log::info!("get_notifications (desktop mock): returning sample notifications");
-        let notifications = serde_json::json!([
-            {
-                "package_name": "com.whatsapp",
-                "key": "0|com.whatsapp|1|null|10001",
-                "post_time": 1712890800000_i64,
-                "ticker_text": "John: Hey, are you free?",
-                "is_ongoing": false,
-                "is_clearable": true
-            },
-            {
-                "package_name": "org.telegram.messenger",
-                "key": "0|org.telegram.messenger|3|null|10002",
-                "post_time": 1712890500000_i64,
-                "ticker_text": "Alice: Meeting at 3pm",
-                "is_ongoing": false,
-                "is_clearable": true
-            },
-            {
-                "package_name": "com.google.android.apps.messaging",
-                "key": "0|com.google.android.apps.messaging|2|null|10003",
-                "post_time": 1712889900000_i64,
-                "ticker_text": "Bob: On my way",
-                "is_ongoing": false,
-                "is_clearable": true
-            }
-        ]);
+        log::info!("get_notifications (desktop): Not supported");
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "notifications": notifications })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("get_notifications is not supported on desktop.".into()),
         }
     }
 
@@ -970,40 +908,25 @@ mod desktop_commands {
         desktop::automation::do_system_key(&action)
     }
 
-    /// Desktop mock for send_chat_message. Simulates the compound flow:
-    /// open app → find contact → type message → send.
-    /// Returns realistic step-by-step result data.
+    /// Desktop real wait. Delegates to desktop::automation for real OS-level sleep.
+    #[tauri::command]
+    pub fn wait(milliseconds: i32) -> ToolResult {
+        log::info!("wait: delegating to desktop::automation — {}ms", milliseconds);
+        desktop::automation::do_wait(milliseconds)
+    }
+
+    /// Desktop mock for send_chat_message. Not supported on desktop.
     #[tauri::command]
     pub fn send_chat_message(
-        app: String,
-        contact: String,
-        message: String,
+        _app: String,
+        _contact: String,
+        _message: String,
     ) -> ToolResult {
-        log::info!(
-            "send_chat_message (desktop mock): app='{}', contact='{}', message='{}'",
-            app, contact, message
-        );
-        if app.trim().is_empty() || contact.trim().is_empty() || message.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("app, contact, and message parameters must not be empty".into()),
-            };
-        }
+        log::info!("send_chat_message (desktop): Not supported");
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "steps": [
-                    { "step": "resolve_app", "status": "ok", "detail": format!("Resolved '{}' to package", app) },
-                    { "step": "open_app", "status": "ok", "detail": format!("Opened {}", app) },
-                    { "step": "find_contact", "status": "ok", "detail": format!("Found contact '{}'", contact) },
-                    { "step": "tap_contact", "status": "ok", "detail": format!("Tapped on '{}'", contact) },
-                    { "step": "type_message", "status": "ok", "detail": format!("Typed message: '{}'", message) },
-                    { "step": "send", "status": "ok", "detail": "Message sent successfully" },
-                ],
-                "message": format!("Sent '{}' to {} via {}", message, contact, app),
-            })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("send_chat_message is not supported on desktop. Use manual app automation if needed.".into()),
         }
     }
 
@@ -1041,44 +964,25 @@ mod desktop_commands {
         desktop::screen::do_get_installed_apps(filter.as_deref())
     }
 
-    /// Desktop mock for make_call. Simulates opening the dialer with the
-    /// given phone number or contact name. Returns an error if target is empty.
+    /// Desktop mock for make_call. Not supported on desktop.
     #[tauri::command]
-    pub fn make_call(target: String) -> ToolResult {
-        log::info!("make_call (desktop mock): target='{}'", target);
-        if target.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("target parameter must not be empty".into()),
-            };
-        }
+    pub fn make_call(_target: String) -> ToolResult {
+        log::info!("make_call (desktop): Not supported");
         ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "message": format!("Calling '{}' via dialer", target),
-                "target": target,
-            })),
-            error: None,
+            success: false,
+            data: None,
+            error: Some("make_call is not supported on desktop.".into()),
         }
     }
 
-    /// Desktop mock for open_permission_settings. Simulates opening an Android
-    /// settings page for accessibility, notifications, or foreground service.
+    /// Desktop mock for open_permission_settings. Not supported on desktop.
     #[tauri::command]
-    pub fn open_permission_settings(target: String) -> ToolResult {
-        log::info!("open_permission_settings (desktop mock): target='{}'", target);
-        match target.as_str() {
-            "accessibility" | "notifications" | "foreground" => ToolResult {
-                success: true,
-                data: Some(serde_json::json!({ "opened": format!("{target} settings") })),
-                error: None,
-            },
-            _ => ToolResult {
-                success: false,
-                data: None,
-                error: Some(format!("Unknown permission target: {target}")),
-            },
+    pub fn open_permission_settings(_target: String) -> ToolResult {
+        log::info!("open_permission_settings (desktop): Not supported");
+        ToolResult {
+            success: false,
+            data: None,
+            error: Some("open_permission_settings is not supported on desktop. Permissions are managed by the OS.".into()),
         }
     }
 
@@ -1163,6 +1067,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::get_installed_apps,
             desktop_commands::make_call,
             desktop_commands::open_permission_settings,
+            desktop_commands::wait,
             desktop_commands::kb_write,
             desktop_commands::kb_read,
             desktop_commands::kb_append,
