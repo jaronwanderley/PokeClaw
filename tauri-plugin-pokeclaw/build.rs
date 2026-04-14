@@ -27,6 +27,9 @@ const COMMANDS: &[&str] = &[
     "get_installed_apps",
     "make_call",
     "open_permission_settings",
+    "start_live_activity",
+    "update_live_activity",
+    "stop_live_activity",
 ];
 
 fn main() {

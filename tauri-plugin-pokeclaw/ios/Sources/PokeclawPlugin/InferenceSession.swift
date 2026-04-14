@@ -32,7 +32,7 @@ public class InferenceSession {
         prompt: String,
         maxNewTokens: Int = 512,
         onEvent: @escaping (String, [String: Any]) -> Void,
-        onComplete: @escaping () -> Void,
+        onComplete: @escaping (String) -> Void,
         onError: @escaping (String) -> Void
     ) {
         guard !isRunning else {
@@ -47,6 +47,7 @@ public class InferenceSession {
                 let inputIds = try engine.tokenizer.encode(text: prompt)
                 var currentIds = inputIds
                 var batchIndex = 0
+                var generatedText = ""
                 
                 Self.logger.info("Starting generation for session \(self.id)")
                 
@@ -69,6 +70,7 @@ public class InferenceSession {
                     
                     currentIds.append(nextTokenId)
                     let tokenText = engine.tokenizer.decode(tokens: [nextTokenId])
+                    generatedText += tokenText
                     
                     // Match Android contract: {event: "token_batch", data: {tokens, batch_index}}
                     let eventData: [String: Any] = [
@@ -83,7 +85,7 @@ public class InferenceSession {
                 }
                 
                 isRunning = false
-                onComplete()
+                onComplete(generatedText)
             } catch {
                 Self.logger.error("Generation failed for session \(self.id): \(error.localizedDescription)")
                 isRunning = false

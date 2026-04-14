@@ -1053,6 +1053,43 @@ mod desktop_commands {
             error: Some("open_permission_settings is not supported on desktop. Permissions are managed by the OS.".into()),
         }
     }
+
+    // -----------------------------------------------------------------
+    // Live Activity desktop mocks
+    // -----------------------------------------------------------------
+
+    /// Desktop mock for start_live_activity. Live Activities are iOS-only.
+    #[tauri::command]
+    pub fn start_live_activity(_title: String) -> ToolResult {
+        log::info!("start_live_activity (desktop): Not supported");
+        ToolResult {
+            success: false,
+            data: None,
+            error: Some("Live Activities are not available on desktop".into()),
+        }
+    }
+
+    /// Desktop mock for update_live_activity. Live Activities are iOS-only.
+    #[tauri::command]
+    pub fn update_live_activity(_step: i32, _total_steps: i32, _description: String, _status: String) -> ToolResult {
+        log::info!("update_live_activity (desktop): Not supported");
+        ToolResult {
+            success: false,
+            data: None,
+            error: Some("Live Activities are not available on desktop".into()),
+        }
+    }
+
+    /// Desktop mock for stop_live_activity. Live Activities are iOS-only.
+    #[tauri::command]
+    pub fn stop_live_activity() -> ToolResult {
+        log::info!("stop_live_activity (desktop): Not supported");
+        ToolResult {
+            success: false,
+            data: None,
+            error: Some("Live Activities are not available on desktop".into()),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1125,6 +1162,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::get_installed_apps,
             desktop_commands::make_call,
             desktop_commands::open_permission_settings,
+            desktop_commands::start_live_activity,
+            desktop_commands::update_live_activity,
+            desktop_commands::stop_live_activity,
         ]);
 
     builder.build()

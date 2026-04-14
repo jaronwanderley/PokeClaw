@@ -106,9 +106,9 @@ public class PokeclawPlugin: Plugin {
                 ]
                 channel.send(payload)
             },
-            onComplete: {
+            onComplete: { fullText in
                 let completeData: [String: Any] = [
-                    "full_text": "", // Placeholder as full text isn't tracked in session currently
+                    "full_text": fullText,
                     "token_count": 0
                 ]
                 let payload: [String: Any] = [
@@ -258,7 +258,7 @@ public class PokeclawPlugin: Plugin {
             info = "Category \(category) not fully implemented on iOS"
         }
 
-        resolve(invoke, true, info)
+        resolve(invoke, true, ["info": info])
     }
 
     @objc public func check_permissions(_ invoke: Invoke) {
@@ -298,7 +298,62 @@ public class PokeclawPlugin: Plugin {
                 installedApps.append(["name": name, "scheme": scheme])
             }
         }
-        resolve(invoke, true, installedApps)
+        resolve(invoke, true, ["apps": installedApps])
+    }
+
+    // MARK: - Live Activity Commands (Dynamic Island)
+
+    @objc public func start_live_activity(_ invoke: Invoke) {
+        let title = invoke.getString("title") ?? ""
+        os_log("start_live_activity: title=%{public}@", log: .default, type: .info, title)
+
+        guard !title.isEmpty else {
+            resolve(invoke, false, nil, "title parameter is required")
+            return
+        }
+
+        if #available(iOS 16.1, *) {
+            let started = LiveActivityManager.shared.startActivity(title: title)
+            if started {
+                resolve(invoke, true)
+            } else {
+                resolve(invoke, false, nil, "Failed to start Live Activity. Ensure Live Activities are enabled in device settings.")
+            }
+        } else {
+            resolve(invoke, false, nil, "Live Activities require iOS 16.1 or later")
+        }
+    }
+
+    @objc public func update_live_activity(_ invoke: Invoke) {
+        let step = invoke.getInt("step") ?? 0
+        let totalSteps = invoke.getInt("totalSteps") ?? 0
+        let description = invoke.getString("description") ?? ""
+        let status = invoke.getString("status") ?? "running"
+
+        os_log("update_live_activity: step=%d/%d, status=%{public}@", log: .default, type: .info, step, totalSteps, status)
+
+        if #available(iOS 16.1, *) {
+            LiveActivityManager.shared.updateActivity(
+                step: step,
+                totalSteps: totalSteps,
+                description: description,
+                status: status
+            )
+            resolve(invoke, true)
+        } else {
+            resolve(invoke, false, nil, "Live Activities require iOS 16.1 or later")
+        }
+    }
+
+    @objc public func stop_live_activity(_ invoke: Invoke) {
+        os_log("stop_live_activity", log: .default, type: .info)
+
+        if #available(iOS 16.1, *) {
+            LiveActivityManager.shared.stopActivity()
+            resolve(invoke, true)
+        } else {
+            resolve(invoke, false, nil, "Live Activities require iOS 16.1 or later")
+        }
     }
 
     // MARK: - Legacy / Unavailable Implementations
