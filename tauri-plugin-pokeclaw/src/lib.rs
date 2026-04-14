@@ -772,54 +772,21 @@ mod desktop_commands {
     }
 
     // -----------------------------------------------------------------
-    // Observation tool desktop mocks
+    // Observation tool desktop commands
     // -----------------------------------------------------------------
 
-    /// Desktop mock for get_screen_info.
-    /// Returns a realistic sample screen tree matching the format
-    /// produced by PokeAccessibilityService.getScreenTree().
+    /// Desktop real get_screen_info.
+    /// Enumerates all visible windows and returns a formatted tree string.
     #[tauri::command]
     pub fn get_screen_info() -> ToolResult {
-        log::info!("get_screen_info (desktop mock): returning sample screen tree");
-        let tree = "[n1] \"Messages\" tap (540,80)\n\
-                     [n2] \"Search\" tap edit (540,160)\n\
-                     [n3] \"John\" tap (270,280)\n\
-                     [n4] \"Hey, are you free?\" (270,330)\n\
-                     [n5] \"Alice\" tap (270,430)\n\
-                     [n6] \"Meeting at 3pm\" (270,480)\n\
-                     [n7] \"Send message\" tap (990,2100)";
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "tree": tree })),
-            error: None,
-        }
+        desktop::screen::do_get_screen_info()
     }
 
-    /// Desktop mock for find_node_info.
-    /// Returns a single mock node matching the searched text.
-    /// Returns an error response if the text parameter is empty.
+    /// Desktop real find_node_info.
+    /// Finds windows matching the given text and returns their metadata as JSON nodes.
     #[tauri::command]
     pub fn find_node_info(text: String) -> ToolResult {
-        log::info!("find_node_info (desktop mock): text='{}'", text);
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text parameter must not be empty".into()),
-            };
-        }
-        let node = serde_json::json!({
-            "index": 0,
-            "className": "android.widget.TextView",
-            "text": text,
-            "bounds": "[100,200][400,260]",
-            "clickable": true,
-        });
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "nodes": [node] })),
-            error: None,
-        }
+        desktop::screen::do_find_node_info(text)
     }
 
     /// Desktop real get_device_info.
