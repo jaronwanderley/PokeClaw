@@ -72,7 +72,7 @@ public class InferenceSession {
                     
                     // Match Android contract: {event: "token_batch", data: {tokens, batch_index}}
                     let eventData: [String: Any] = [
-                        "tokens": [tokenText],
+                        "tokens": tokenText,
                         "batch_index": batchIndex
                     ]
                     
