@@ -9,7 +9,7 @@ use serde_json::Value;
 // Desktop real-OS imports (gated same as DesktopToolExecutor)
 // ---------------------------------------------------------------------------
 #[cfg(not(target_os = "android"))]
-use tauri_plugin_pokeclaw::desktop::{automation, system};
+use tauri_plugin_pokeclaw::desktop::{automation, system, screen};
 
 // ---------------------------------------------------------------------------
 // ToolResult — mirrors plugin ToolResult for agent-internal use
@@ -119,8 +119,11 @@ impl ToolExecutor for DesktopToolExecutor {
 
         let result = match tool_name {
             // --- Observation tools ---
-            "get_screen_info" => self.mock_get_screen_info(),
-            "find_node_info" => self.mock_find_node_info(&params),
+            "get_screen_info" => convert_tool_result(screen::do_get_screen_info()),
+            "find_node_info" => {
+                let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                convert_tool_result(screen::do_find_node_info(text))
+            }
             "input_text" => {
                 let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
                 let node_id = params.get("node_id").and_then(|v| v.as_str());
@@ -133,7 +136,10 @@ impl ToolExecutor for DesktopToolExecutor {
             }
             "open_app" => self.mock_open_app(&params),
             "get_installed_apps" => self.mock_get_installed_apps(&params),
-            "take_screenshot" => self.mock_take_screenshot(&params),
+            "take_screenshot" => {
+                let file_path = params.get("file_path").and_then(|v| v.as_str());
+                convert_tool_result(screen::do_take_screenshot(file_path))
+            }
             "wait" => self.mock_wait(&params),
             "repeat_actions" => self.mock_repeat_actions(&params),
             "clipboard" => {
@@ -248,35 +254,6 @@ impl ToolExecutor for DesktopToolExecutor {
 // ---------------------------------------------------------------------------
 
 impl DesktopToolExecutor {
-    fn mock_get_screen_info(&self) -> ToolResult {
-        let tree = "[n1] \"Messages\" tap (540,80)\n\
-                     [n2] \"Search\" tap edit (540,160)\n\
-                     [n3] \"John\" tap (270,280)";
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({ "tree": tree })),
-            error: None,
-        }
-    }
-
-    fn mock_find_node_info(&self, params: &Value) -> ToolResult {
-        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        if text.trim().is_empty() {
-            return ToolResult {
-                success: false,
-                data: None,
-                error: Some("text parameter must not be empty".into()),
-            };
-        }
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "nodes": [{ "index": 0, "text": text, "bounds": "[100,200][400,260]", "clickable": true }]
-            })),
-            error: None,
-        }
-    }
-
     fn mock_open_app(&self, params: &Value) -> ToolResult {
         let app_name = params.get("app_name").and_then(|v| v.as_str()).unwrap_or("");
         if app_name.trim().is_empty() {
@@ -301,18 +278,6 @@ impl DesktopToolExecutor {
                     { "package_name": "com.whatsapp", "app_name": "WhatsApp" },
                     { "package_name": "org.telegram.messenger", "app_name": "Telegram" },
                 ]
-            })),
-            error: None,
-        }
-    }
-
-    fn mock_take_screenshot(&self, _params: &Value) -> ToolResult {
-        ToolResult {
-            success: true,
-            data: Some(serde_json::json!({
-                "file_path": "/tmp/screenshots/mock.png",
-                "width": 1080,
-                "height": 2400,
             })),
             error: None,
         }
