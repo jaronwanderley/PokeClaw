@@ -23,7 +23,7 @@ use crate::agent::skill::executor::SkillExecutor;
 use crate::agent::skill::registry::SkillRegistry;
 use crate::agent::task_event::TaskEvent;
 use crate::agent::tool_executor::{
-    AgentRoundResult, DesktopToolExecutor, TokenUsage, ToolCallResult, ToolExecutor,
+    AgentRoundResult, ToolExecutorHandle as DesktopToolExecutor, TokenUsage, ToolCallResult, ToolExecutor,
 };
 use crate::agent::tool_registry::ToolRegistry;
 use crate::db::chat::ChatMessageRecord;

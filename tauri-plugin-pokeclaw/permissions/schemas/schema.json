@@ -547,6 +547,18 @@
           "markdownDescription": "Denies the send_message command without any pre-configured scope."
         },
         {
+          "description": "Enables the start_live_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-live-activity",
+          "markdownDescription": "Enables the start_live_activity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_live_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-live-activity",
+          "markdownDescription": "Denies the start_live_activity command without any pre-configured scope."
+        },
+        {
           "description": "Enables the start_session command without any pre-configured scope.",
           "type": "string",
           "const": "allow-start-session",
@@ -557,6 +569,18 @@
           "type": "string",
           "const": "deny-start-session",
           "markdownDescription": "Denies the start_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_live_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-live-activity",
+          "markdownDescription": "Enables the stop_live_activity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_live_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-live-activity",
+          "markdownDescription": "Denies the stop_live_activity command without any pre-configured scope."
         },
         {
           "description": "Enables the stop_session command without any pre-configured scope.",
@@ -629,6 +653,18 @@
           "type": "string",
           "const": "deny-tap-node",
           "markdownDescription": "Denies the tap_node command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_live_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-live-activity",
+          "markdownDescription": "Enables the update_live_activity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_live_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-live-activity",
+          "markdownDescription": "Denies the update_live_activity command without any pre-configured scope."
         }
       ]
     }

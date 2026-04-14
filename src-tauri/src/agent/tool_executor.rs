@@ -7,8 +7,9 @@ use serde_json::Value;
 
 // ---------------------------------------------------------------------------
 // Desktop real-OS imports (gated same as DesktopToolExecutor)
+// Three-way: exclude both Android and iOS from desktop-only modules.
 // ---------------------------------------------------------------------------
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_pokeclaw::desktop::{automation, system, screen, kb};
 
 // ---------------------------------------------------------------------------
@@ -82,7 +83,7 @@ pub trait ToolExecutor: Send + Sync {
 
 /// Convert the plugin's ToolResult to the agent-internal ToolResult.
 /// Both structs have identical public fields (success, data, error).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn convert_tool_result(plugin_result: tauri_plugin_pokeclaw::ToolResult) -> ToolResult {
     ToolResult {
         success: plugin_result.success,
@@ -93,12 +94,15 @@ fn convert_tool_result(plugin_result: tauri_plugin_pokeclaw::ToolResult) -> Tool
 
 // ---------------------------------------------------------------------------
 // DesktopToolExecutor — dispatches real OS calls for input/clipboard/device tools
+// Three-way cfg: desktop only (excludes Android and iOS).
 // ---------------------------------------------------------------------------
 
 /// Executes tool calls using real OS-level implementations for desktop input,
 /// clipboard, and device-info tools. Other tools remain as mock implementations.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct DesktopToolExecutor;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl DesktopToolExecutor {
     pub fn new() -> Self {
         info!("DesktopToolExecutor created");
@@ -106,12 +110,14 @@ impl DesktopToolExecutor {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Default for DesktopToolExecutor {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl ToolExecutor for DesktopToolExecutor {
     fn execute(&self, tool_name: &str, params: Value) -> ToolResult {
         let start = std::time::Instant::now();
@@ -281,6 +287,7 @@ impl ToolExecutor for DesktopToolExecutor {
 // Mock implementations — mirrors the desktop_commands logic
 // ---------------------------------------------------------------------------
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl DesktopToolExecutor {
     fn mock_repeat_actions(&self, params: &Value) -> ToolResult {
         let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1);
@@ -368,6 +375,68 @@ impl DesktopToolExecutor {
 }
 
 // ---------------------------------------------------------------------------
+// IosToolExecutor — stub that returns structured errors for all tool calls.
+// iOS tool calls are handled by the Swift plugin layer via Tauri IPC;
+// this executor exists so the Rust agent loop can compile on iOS without
+// importing desktop-only modules (xcap, enigo, etc.).
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "ios")]
+pub struct IosToolExecutor;
+
+#[cfg(target_os = "ios")]
+impl IosToolExecutor {
+    pub fn new() -> Self {
+        info!("IosToolExecutor created — tools handled by Swift plugin via IPC");
+        Self
+    }
+}
+
+#[cfg(target_os = "ios")]
+impl Default for IosToolExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "ios")]
+impl ToolExecutor for IosToolExecutor {
+    fn execute(&self, tool_name: &str, _params: Value) -> ToolResult {
+        info!(
+            "IosToolExecutor: tool '{}' not available on iOS — handled by Swift plugin",
+            tool_name
+        );
+        ToolResult {
+            success: false,
+            data: None,
+            error: Some(format!(
+                "Not available on iOS — use Swift plugin IPC for '{}'",
+                tool_name
+            )),
+        }
+    }
+
+    fn available_tools(&self) -> Vec<String> {
+        // iOS tools are registered via the Swift plugin, not through this executor.
+        vec![]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ToolExecutorHandle — platform-specific type alias
+//
+// Consumers (loop_runner.rs, commands.rs) use this instead of directly
+// naming DesktopToolExecutor or IosToolExecutor, avoiding the need for
+// cfg gates at every call site.
+// ---------------------------------------------------------------------------
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub type ToolExecutorHandle = DesktopToolExecutor;
+
+#[cfg(target_os = "ios")]
+pub type ToolExecutorHandle = IosToolExecutor;
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -376,6 +445,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn executor() -> DesktopToolExecutor {
         DesktopToolExecutor::new()
     }

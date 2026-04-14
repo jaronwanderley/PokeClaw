@@ -556,6 +556,32 @@ Denies the send_message command without any pre-configured scope.
 <tr>
 <td>
 
+`pokeclaw:allow-start-live-activity`
+
+</td>
+<td>
+
+Enables the start_live_activity command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-start-live-activity`
+
+</td>
+<td>
+
+Denies the start_live_activity command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `pokeclaw:allow-start-session`
 
 </td>
@@ -575,6 +601,32 @@ Enables the start_session command without any pre-configured scope.
 <td>
 
 Denies the start_session command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-stop-live-activity`
+
+</td>
+<td>
+
+Enables the stop_live_activity command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-stop-live-activity`
+
+</td>
+<td>
+
+Denies the stop_live_activity command without any pre-configured scope.
 
 </td>
 </tr>
@@ -731,6 +783,32 @@ Enables the tap_node command without any pre-configured scope.
 <td>
 
 Denies the tap_node command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:allow-update-live-activity`
+
+</td>
+<td>
+
+Enables the update_live_activity command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`pokeclaw:deny-update-live-activity`
+
+</td>
+<td>
+
+Denies the update_live_activity command without any pre-configured scope.
 
 </td>
 </tr>

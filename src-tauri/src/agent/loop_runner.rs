@@ -810,7 +810,7 @@ mod tests {
             }),
         }]);
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = VecEmitter::new();
         let cancel = Arc::new(AtomicBool::new(false));
 
@@ -864,7 +864,7 @@ mod tests {
             },
         ]);
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let emitter_clone = emitter.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -918,7 +918,7 @@ mod tests {
             }),
         }]);
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let emitter_clone = emitter.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -966,7 +966,7 @@ mod tests {
             usage: None,
         }]);
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let emitter_clone = emitter.clone();
 
@@ -1001,7 +1001,7 @@ mod tests {
             error: LlmError::AuthFailed,
         };
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let emitter_clone = emitter.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -1051,7 +1051,7 @@ mod tests {
             .collect();
 
         let provider = MockProvider::new(responses);
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let emitter_clone = emitter.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -1132,7 +1132,7 @@ mod tests {
             },
         ]);
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let emitter_clone = emitter.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -1242,7 +1242,7 @@ mod tests {
         let provider = HistoryInspectingProvider {
             call_count: Mutex::new(0),
         };
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let cancel = Arc::new(AtomicBool::new(false));
 
@@ -1312,7 +1312,7 @@ mod tests {
         let provider = CancelAfterFirstProvider {
             cancel: cancel_clone,
         };
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
 
         let result = run_agent_loop(
@@ -1364,7 +1364,7 @@ mod tests {
             }),
         }]);
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let cancel = Arc::new(AtomicBool::new(false));
 
@@ -1411,7 +1411,7 @@ mod tests {
             }),
         }]);
 
-        let executor = crate::agent::tool_executor::DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::ToolExecutorHandle::new();
         let emitter = Arc::new(VecEmitter::new());
         let cancel = Arc::new(AtomicBool::new(false));
 
