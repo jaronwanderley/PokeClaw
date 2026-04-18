@@ -1,34 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <service
-        android:name=".PokeAccessibilityService"
-        android:exported="false"
-        android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-        <intent-filter>
-            <action android:name="android.accessibilityservice.AccessibilityService" />
-        </intent-filter>
-        <meta-data
-            android:name="android.accessibilityservice"
-            android:resource="@xml/accessibility_service_config" />
-    </service>
+    <application>
+        <service
+            android:name=".PokeAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
-    <service
-        android:name=".PokeNotificationListener"
-        android:exported="false"
-        android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-        <intent-filter>
-            <action android:name="android.service.notification.NotificationListenerService" />
-        </intent-filter>
-    </service>
+        <service
+            android:name=".PokeNotificationListener"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
-    <service
-        android:name=".PokeForegroundService"
-        android:exported="false"
-        android:foregroundServiceType="specialUse">
-        <intent-filter>
-            <action android:name="io.agents.pokeclaw.action.START_FOREGROUND" />
-            <action android:name="io.agents.pokeclaw.action.STOP_FOREGROUND" />
-            <action android:name="io.agents.pokeclaw.action.RESTART_FOREGROUND" />
-        </intent-filter>
-    </service>
+        <service
+            android:name=".PokeForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="io.agents.pokeclaw.action.START_FOREGROUND" />
+                <action android:name="io.agents.pokeclaw.action.STOP_FOREGROUND" />
+                <action android:name="io.agents.pokeclaw.action.RESTART_FOREGROUND" />
+            </intent-filter>
+        </service>
+    </application>
 </manifest>

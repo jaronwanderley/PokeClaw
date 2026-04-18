@@ -84,7 +84,7 @@ class PokeNotificationListener : NotificationListenerService() {
             putExtra(EXTRA_TICKER_TEXT, tickerText)
             putExtra(EXTRA_POST_TIME, postTime)
             putExtra(EXTRA_KEY, key)
-            setPackage(`package`?.packageName)
+            setPackage(packageName)
         }
         sendBroadcast(intent)
     }
@@ -100,7 +100,7 @@ class PokeNotificationListener : NotificationListenerService() {
         val intent = Intent(ACTION_NOTIFICATION_REMOVED).apply {
             putExtra(EXTRA_PACKAGE_NAME, packageName)
             putExtra(EXTRA_KEY, key)
-            setPackage(`package`?.packageName)
+            setPackage(packageName)
         }
         sendBroadcast(intent)
     }

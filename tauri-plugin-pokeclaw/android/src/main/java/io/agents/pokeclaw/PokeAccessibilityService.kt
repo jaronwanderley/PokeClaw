@@ -101,6 +101,22 @@ class PokeAccessibilityService : AccessibilityService() {
             }
             return false
         }
+
+        /**
+         * Recycles a list of AccessibilityNodeInfo nodes.
+         * Call this after you are done using nodes returned by findNodesByText.
+         */
+        @JvmStatic
+        fun recycleNodes(nodes: List<AccessibilityNodeInfo>?) {
+            if (nodes == null) return
+            for (node in nodes) {
+                try {
+                    node.recycle()
+                } catch (_: Exception) {
+                    // Already recycled
+                }
+            }
+        }
     }
 
     /** Node ID → center coordinates mapping for tap_node tool */
@@ -171,7 +187,7 @@ class PokeAccessibilityService : AccessibilityService() {
      * Returns the root node of the active window, or null.
      * Public accessor so plugin tools can traverse the tree directly.
      */
-    fun getRootInActiveWindow(): AccessibilityNodeInfo? = rootInActiveWindow
+    override fun getRootInActiveWindow(): AccessibilityNodeInfo? = rootInActiveWindow
 
     /**
      * Returns detailed info about a single node as a human-readable string.
@@ -189,24 +205,6 @@ class PokeAccessibilityService : AccessibilityService() {
         node.getBoundsInScreen(bounds)
         sb.append(", bounds=").append(bounds.toShortString())
         return sb.toString()
-    }
-
-    /**
-     * Recycles a list of AccessibilityNodeInfo nodes.
-     * Call this after you are done using nodes returned by findNodesByText.
-     */
-    companion object {
-        @JvmStatic
-        fun recycleNodes(nodes: List<AccessibilityNodeInfo>?) {
-            if (nodes == null) return
-            for (node in nodes) {
-                try {
-                    node.recycle()
-                } catch (_: Exception) {
-                    // Already recycled
-                }
-            }
-        }
     }
 
     // ======================== Gesture Dispatch ========================
@@ -492,20 +490,18 @@ class PokeAccessibilityService : AccessibilityService() {
 
         try {
             val metrics = resources.displayMetrics
-            val width = metrics.widthPixels
-            val height = metrics.heightPixels
 
-            // Use accessibility service takeScreenshot API (API 30+)
             val latch = java.util.concurrent.CountDownLatch(1)
             var resultPath: String? = null
             var errorMsg: String? = null
 
-            @Suppress("DEPRECATION")
             takeScreenshot(
                 android.view.Display.DEFAULT_DISPLAY,
-                { bitmap ->
+                { callback ->
                     try {
-                        val androidBitmap = bitmap.bitmap
+                        val hardwareBuffer = callback.hardwareBuffer
+                        val androidBitmap = android.graphics.Bitmap.wrapHardwareBuffer(hardwareBuffer, null)
+                            ?: throw RuntimeException("Failed to wrap HardwareBuffer")
                         val outputFile = java.io.File(
                             filePath ?: "${cacheDir.absolutePath}/screenshot_${System.currentTimeMillis()}.png"
                         )
@@ -520,11 +516,16 @@ class PokeAccessibilityService : AccessibilityService() {
                         errorMsg = e.message
                         Log.e(TAG, "takeScreenshot: failed to save bitmap", e)
                     } finally {
-                        bitmap.hardwareBuffer.close()
+                        callback.hardwareBuffer.close()
                         latch.countDown()
                     }
                 },
-                Handler(Looper.getMainLooper())
+                { errorCode ->
+                    errorMsg = "takeScreenshot failed with error code: $errorCode"
+                    Log.e(TAG, "takeScreenshot: $errorMsg")
+                    latch.countDown()
+                },
+                android.os.Handler(Looper.getMainLooper())
             )
 
             val completed = latch.await(5, TimeUnit.SECONDS)

@@ -212,7 +212,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         Log.i(TAG, "send_message: starting async streaming inference")
 
         // Launch streaming on a coroutine — this method returns immediately
-        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+        streamingScope.launch(streamingScope.coroutineContext) {
             val fullText = StringBuilder()
             val batchBuffer = StringBuilder()
             var batchIndex = 0
@@ -496,7 +496,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         }
 
         // Launch download on IO coroutine
-        kotlinx.coroutines.launch(streamingScope.coroutineContext + Dispatchers.IO) {
+        streamingScope.launch(streamingScope.coroutineContext + Dispatchers.IO) {
             Log.i(TAG, "download_model: starting download for ${model.fileName}")
 
             try {
@@ -1005,7 +1005,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
             if (launchSuccess) {
                 // Dismiss chain-launch dialog after a short delay
-                kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+                streamingScope.launch(streamingScope.coroutineContext) {
                     Thread.sleep(1500)
                     try {
                         service.pressBack()
@@ -1456,7 +1456,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
         Log.i(TAG, "send_chat_message: app='$appName', contact='$contact', message='${message.take(50)}...'")
 
-        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+        streamingScope.launch(streamingScope.coroutineContext) {
             try {
                 val result = performSendChatMessage(appName, contact, message)
                 invoke.resolve(result)
@@ -2350,7 +2350,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
         Log.i(TAG, "scroll_to_find: text='$text', direction=$direction, max_scrolls=$maxScrolls")
 
-        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+        streamingScope.launch(streamingScope.coroutineContext) {
             try {
                 val result = performScrollToFind(text, direction, maxScrolls)
                 invoke.resolve(result)
@@ -2393,7 +2393,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
         Log.i(TAG, "find_and_tap: text='$text', direction=$direction, max_scrolls=$maxScrolls")
 
-        kotlinx.coroutines.launch(streamingScope.coroutineContext) {
+        streamingScope.launch(streamingScope.coroutineContext) {
             try {
                 val result = performFindAndTap(text, direction, maxScrolls)
                 invoke.resolve(result)

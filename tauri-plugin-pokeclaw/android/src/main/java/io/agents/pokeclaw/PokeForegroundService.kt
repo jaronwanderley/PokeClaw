@@ -14,6 +14,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import io.agents.pokeclaw.plugin.R
 import android.util.Log
 
 /**

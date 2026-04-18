@@ -1056,4 +1056,377 @@ mod tests {
 
         assert_eq!(tools_expected_success.len() + tools_expected_failure.len(), 28);
     }
+
+    // -----------------------------------------------------------------------
+    // Integration tests: 3-tier pipeline routing
+    // These tests verify that the PipelineRouter + ToolExecutor work
+    // together correctly for all three tiers (DirectTool, Skill, AgentLoop).
+    // On desktop, DesktopToolExecutor is used — the same path commands.rs
+    // uses via create_executor().
+    // -----------------------------------------------------------------------
+
+    /// Integration test: DirectTool path — "screenshot" routes to take_screenshot
+    /// and the executor handles it successfully.
+    #[test]
+    fn test_integration_direct_tool_screenshot() {
+        let exec = executor();
+        let reg = crate::agent::pipeline::PipelineRouter::route(
+            "screenshot",
+            &crate::agent::skill::registry::SkillRegistry::with_builtins(),
+        );
+
+        match reg {
+            crate::agent::pipeline::Route::DirectTool { tool_name, .. } => {
+                assert_eq!(tool_name, "take_screenshot");
+                let result = exec.execute(&tool_name, json!({}));
+                assert!(result.success, "DirectTool 'take_screenshot' should succeed on desktop");
+            }
+            other => panic!("Expected DirectTool route, got {:?}", other),
+        }
+    }
+
+    /// Integration test: DirectTool path — "back" routes to system_key(back)
+    /// and the executor handles it successfully.
+    #[test]
+    fn test_integration_direct_tool_back() {
+        let exec = executor();
+        let reg = crate::agent::pipeline::PipelineRouter::route(
+            "back",
+            &crate::agent::skill::registry::SkillRegistry::with_builtins(),
+        );
+
+        match reg {
+            crate::agent::pipeline::Route::DirectTool { tool_name, params, .. } => {
+                assert_eq!(tool_name, "system_key");
+                assert_eq!(params.get("key").unwrap().as_str(), Some("back"));
+                let result = exec.execute(&tool_name, json!({ "key": "back" }));
+                assert!(result.success, "DirectTool 'system_key(back)' should succeed on desktop");
+            }
+            other => panic!("Expected DirectTool route, got {:?}", other),
+        }
+    }
+
+    /// Integration test: DirectTool path — "open WhatsApp" routes to open_app
+    /// and the executor handles it. Note: on desktop, this may fail if the app
+    /// is not installed — we verify routing correctness and that execution doesn't
+    /// panic, accepting both success and "not found" style errors.
+    #[test]
+    fn test_integration_direct_tool_open_app() {
+        let exec = executor();
+        let reg = crate::agent::pipeline::PipelineRouter::route(
+            "open WhatsApp",
+            &crate::agent::skill::registry::SkillRegistry::with_builtins(),
+        );
+
+        match reg {
+            crate::agent::pipeline::Route::DirectTool { tool_name, params, .. } => {
+                assert_eq!(tool_name, "open_app");
+                assert_eq!(params.get("app_name").unwrap().as_str(), Some("WhatsApp"));
+                let result = exec.execute(&tool_name, json!({ "app_name": "WhatsApp" }));
+                // On desktop, the tool executes via real OS calls. If WhatsApp isn't
+                // installed, it returns success=false — but the routing and dispatch
+                // path is correct regardless.
+                // Just verify it didn't panic and returned a structured result.
+                if !result.success {
+                    assert!(result.error.is_some(), "Failed result should have an error message");
+                }
+            }
+            other => panic!("Expected DirectTool route, got {:?}", other),
+        }
+    }
+
+    /// Integration test: Skill path — "close dialog" routes to the dismiss skill.
+    /// Verifies the routing is correct (actual skill execution uses SkillExecutor,
+    /// tested separately in skill::executor tests).
+    #[test]
+    fn test_integration_skill_close_dialog() {
+        let skill_reg = crate::agent::skill::registry::SkillRegistry::with_builtins();
+        let reg = crate::agent::pipeline::PipelineRouter::route(
+            "close dialog",
+            &skill_reg,
+        );
+
+        match reg {
+            crate::agent::pipeline::Route::Skill { skill_id, .. } => {
+                assert_eq!(skill_id, "dismiss");
+                // Verify the skill exists in the registry and has steps
+                let skill = skill_reg.find_by_id(&skill_id)
+                    .expect("dismiss skill should exist in registry");
+                assert!(!skill.steps.is_empty(), "dismiss skill should have steps");
+            }
+            other => panic!("Expected Skill route for 'close dialog', got {:?}", other),
+        }
+    }
+
+    /// Integration test: Skill path — "check notifications" routes to the
+    /// check_notifications skill. Verifies the skill is found and has steps.
+    #[test]
+    fn test_integration_skill_check_notifications() {
+        let skill_reg = crate::agent::skill::registry::SkillRegistry::with_builtins();
+        let reg = crate::agent::pipeline::PipelineRouter::route(
+            "check notifications",
+            &skill_reg,
+        );
+
+        match reg {
+            crate::agent::pipeline::Route::Skill { skill_id, .. } => {
+                assert_eq!(skill_id, "check_notifications");
+                let skill = skill_reg.find_by_id(&skill_id)
+                    .expect("check_notifications skill should exist");
+                assert!(!skill.steps.is_empty(), "check_notifications skill should have steps");
+            }
+            other => panic!("Expected Skill route for 'check notifications', got {:?}", other),
+        }
+    }
+
+    /// Integration test: Skill execution end-to-end with real executor.
+    /// Executes the dismiss skill using DesktopToolExecutor — verifies the
+    /// SkillExecutor can drive the real executor through a skill's steps.
+    #[test]
+    fn test_integration_skill_execution_with_real_executor() {
+        use crate::agent::skill::executor::SkillExecutor;
+        use std::sync::atomic::AtomicBool;
+
+        let skill_reg = crate::agent::skill::registry::SkillRegistry::with_builtins();
+        let skill = skill_reg.find_by_id("dismiss")
+            .expect("dismiss skill should exist")
+            .clone();
+
+        let exec = executor();
+        let cancel = AtomicBool::new(false);
+        let result = SkillExecutor::execute_skill(&skill, &exec, &cancel);
+
+        // On desktop, dismiss skill steps may fail (e.g. system_key "back"
+        // on desktop may succeed). We just verify the skill completes or
+        // fails gracefully with a fallback_goal.
+        match result {
+            crate::agent::skill::executor::SkillResult::Completed { answer } => {
+                assert!(!answer.is_empty(), "Completed answer should not be empty");
+            }
+            crate::agent::skill::executor::SkillResult::Failed { error, fallback_goal } => {
+                assert!(!error.is_empty(), "Failed error should describe what went wrong");
+                assert!(!fallback_goal.is_empty(), "Failed should have a fallback_goal for agent loop");
+            }
+        }
+    }
+
+    /// Integration test: AgentLoop path — compound task routes to AgentLoop.
+    #[test]
+    fn test_integration_agent_loop_compound_task() {
+        let reg = crate::agent::pipeline::PipelineRouter::route(
+            "open WhatsApp and send hello to Mom",
+            &crate::agent::skill::registry::SkillRegistry::with_builtins(),
+        );
+
+        match reg {
+            crate::agent::pipeline::Route::AgentLoop { task } => {
+                assert_eq!(task, "open WhatsApp and send hello to Mom");
+            }
+            other => panic!("Expected AgentLoop route for compound task, got {:?}", other),
+        }
+    }
+
+    /// Integration test: AgentLoop path — complex task routes to AgentLoop.
+    #[test]
+    fn test_integration_agent_loop_complex_task() {
+        let reg = crate::agent::pipeline::PipelineRouter::route(
+            "find the nearest pizza place and order a margherita",
+            &crate::agent::skill::registry::SkillRegistry::with_builtins(),
+        );
+
+        assert!(
+            matches!(reg, crate::agent::pipeline::Route::AgentLoop { .. }),
+            "Complex task should route to AgentLoop"
+        );
+    }
+
+    /// Integration test: AgentLoop with mock provider end-to-end.
+    /// Simulates the full agent loop cycle: LLM returns a tool call →
+    /// executor handles it → result fed back → LLM returns text → done.
+    /// This is the same pattern as loop_runner tests but explicitly
+    /// uses ToolExecutorHandle (the platform-specific type alias).
+    #[tokio::test]
+    async fn test_integration_agent_loop_with_executor() {
+        use crate::agent::loop_runner::{run_agent_loop, EventEmitter};
+        use crate::agent::llm::{LlmResponse, TokenUsage, ToolCall};
+        use crate::agent::config::AgentConfig;
+        use crate::agent::tool_registry::ToolRegistry;
+        use std::sync::{Arc, Mutex};
+
+        struct MockProvider {
+            responses: Mutex<Vec<LlmResponse>>,
+        }
+
+        impl MockProvider {
+            fn new(responses: Vec<LlmResponse>) -> Self {
+                Self { responses: Mutex::new(responses) }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl crate::agent::llm::LlmProvider for MockProvider {
+            async fn chat(
+                &self,
+                _messages: Vec<crate::agent::llm::ChatMessage>,
+                _tools: Vec<serde_json::Value>,
+            ) -> Result<LlmResponse, crate::agent::llm::LlmError> {
+                let mut responses = self.responses.lock().unwrap();
+                Ok(responses.remove(0))
+            }
+        }
+
+        struct VecEmitter { events: Mutex<Vec<crate::agent::task_event::TaskEvent>> }
+        impl VecEmitter {
+            fn new() -> Self { Self { events: Mutex::new(Vec::new()) } }
+            fn events(&self) -> Vec<crate::agent::task_event::TaskEvent> {
+                self.events.lock().unwrap().clone()
+            }
+        }
+        impl EventEmitter for VecEmitter {
+            fn emit(&self, event: crate::agent::task_event::TaskEvent) -> bool {
+                self.events.lock().unwrap().push(event);
+                true
+            }
+        }
+
+        let provider = MockProvider::new(vec![
+            // Round 1: LLM returns a tool call for get_screen_info
+            LlmResponse {
+                text: Some("Let me check the screen.".to_string()),
+                tool_calls: vec![ToolCall {
+                    id: "call_1".to_string(),
+                    name: "get_screen_info".to_string(),
+                    arguments: "{}".to_string(),
+                }],
+                usage: Some(TokenUsage { prompt_tokens: 50, completion_tokens: 20 }),
+            },
+            // Round 2: LLM returns a tool call for tap
+            LlmResponse {
+                text: Some("I see the button, tapping it.".to_string()),
+                tool_calls: vec![ToolCall {
+                    id: "call_2".to_string(),
+                    name: "tap".to_string(),
+                    arguments: r#"{"x":540,"y":960}"#.to_string(),
+                }],
+                usage: Some(TokenUsage { prompt_tokens: 80, completion_tokens: 15 }),
+            },
+            // Round 3: LLM returns text — done
+            LlmResponse {
+                text: Some("Button tapped!".to_string()),
+                tool_calls: vec![],
+                usage: Some(TokenUsage { prompt_tokens: 100, completion_tokens: 5 }),
+            },
+        ]);
+
+        // Use the platform-specific ToolExecutorHandle (DesktopToolExecutor on desktop)
+        let exec = ToolExecutorHandle::new();
+        let emitter = Arc::new(VecEmitter::new());
+        let emitter_clone = emitter.clone();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let config = AgentConfig {
+            model_name: "test-model".to_string(),
+            max_iterations: 5,
+            system_prompt: "You are a test agent.".to_string(),
+            max_tokens: 250_000,
+            max_cost_usd: 1.0,
+            soft_limit_percent: 0.80,
+        };
+
+        let result = run_agent_loop(
+            "Tap the button".to_string(),
+            Box::new(provider),
+            Box::new(exec),
+            ToolRegistry::default(),
+            Box::new(emitter_clone),
+            cancel,
+            config,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok(), "Agent loop should complete successfully");
+
+        let events = emitter.events();
+        // Verify the full event sequence: LoopStart → TokenUpdate → Thinking → ToolAction → ToolResult × 2 rounds
+        let tool_actions: Vec<_> = events.iter()
+            .filter_map(|e| match e {
+                crate::agent::task_event::TaskEvent::ToolAction { tool_name } => Some(tool_name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tool_actions, vec!["get_screen_info", "tap"],
+            "Tool actions should be get_screen_info then tap");
+
+        let tool_results: Vec<_> = events.iter()
+            .filter_map(|e| match e {
+                crate::agent::task_event::TaskEvent::ToolResult { tool_name, success, .. } =>
+                    Some((tool_name.clone(), *success)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tool_results.len(), 2, "Should have 2 tool results");
+        assert!(tool_results[0].1, "get_screen_info should succeed");
+        assert!(tool_results[1].1, "tap should succeed");
+
+        // Verify completion
+        let completed: Vec<_> = events.iter()
+            .filter(|e| matches!(e, crate::agent::task_event::TaskEvent::Completed { .. }))
+            .collect();
+        assert_eq!(completed.len(), 1, "Should have exactly one Completed event");
+    }
+
+    /// Integration test: verify ToolExecutorHandle is DesktopToolExecutor on desktop.
+    /// This is a compile-time guarantee — if this test compiles on desktop,
+    /// the type alias is correct.
+    #[test]
+    fn test_integration_tool_executor_handle_is_desktop() {
+        let _exec: DesktopToolExecutor = ToolExecutorHandle::new();
+        // Also verify it implements ToolExecutor
+        let exec: &dyn ToolExecutor = &ToolExecutorHandle::new();
+        let tools = exec.available_tools();
+        assert_eq!(tools.len(), 28, "ToolExecutorHandle should expose all 28 tools");
+    }
+
+    /// Integration test: verify the send_message tool name is present in
+    /// available_tools and maps correctly on desktop (not supported error).
+    /// On Android, this would route to send_chat_message via IPC.
+    #[test]
+    fn test_integration_send_message_in_available_tools() {
+        let exec = executor();
+        let tools = exec.available_tools();
+        assert!(tools.contains(&"send_message".to_string()),
+            "send_message should be in available_tools for LLM schema generation");
+        let result = exec.execute("send_message", json!({
+            "contact": "Mom", "message": "hello", "app": "whatsapp"
+        }));
+        // On desktop, send_message returns "not supported" (mobile-only)
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("not supported"));
+    }
+
+    /// Integration test: verify finish tool works through the executor,
+    /// since finish is handled locally on both desktop and Android.
+    #[test]
+    fn test_integration_finish_tool_local_handler() {
+        let exec = executor();
+        let result = exec.execute("finish", json!({
+            "result": "Task completed successfully", "success": true
+        }));
+        assert!(result.success, "finish tool should succeed");
+        assert_eq!(result.data.unwrap()["result"], "Task completed successfully");
+    }
+
+    /// Integration test: verify repeat_actions tool (local handler on both platforms).
+    #[test]
+    fn test_integration_repeat_actions_local_handler() {
+        let exec = executor();
+        let result = exec.execute("repeat_actions", json!({
+            "count": 3, "actions": []
+        }));
+        assert!(result.success, "repeat_actions should succeed");
+        assert!(result.data.unwrap()["message"].as_str().unwrap().contains("3"));
+    }
 }
