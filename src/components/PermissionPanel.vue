@@ -17,9 +17,9 @@ const permissions = ref<PermissionStatus | null>(null)
 const loadingTarget = ref<string | null>(null)
 
 const cards = [
-  { key: 'accessibility_enabled' as const, target: 'accessibility', label: 'Accessibility Service', desc: 'Read screen content and perform gestures' },
-  { key: 'notification_enabled' as const, target: 'notification', label: 'Notification Access', desc: 'Read and dismiss notifications' },
-  { key: 'foreground_service' as const, target: 'foreground_service', label: 'Foreground Service', desc: 'Keep the agent running in background' },
+  { key: 'accessibilityEnabled' as const, target: 'accessibility', label: 'Accessibility Service', desc: 'Read screen content and perform gestures' },
+  { key: 'notificationEnabled' as const, target: 'notification', label: 'Notification Access', desc: 'Read and dismiss notifications' },
+  { key: 'foregroundService' as const, target: 'foreground_service', label: 'Foreground Service', desc: 'Keep the agent running in background' },
 ]
 
 watch(() => props.visible, async (visible) => {

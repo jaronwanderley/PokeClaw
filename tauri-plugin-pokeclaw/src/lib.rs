@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::sync::Arc;
 use tauri::{
     plugin::{Builder, TauriPlugin},
-    Manager, Runtime, State,
+    AppHandle, Manager, Runtime, State,
 };
 
 // ---------------------------------------------------------------------------
@@ -243,7 +243,8 @@ mod session_impl {
         None
     }
 
-    pub fn do_start_session(
+    pub fn do_start_session<R: Runtime>(
+        app: &AppHandle<R>,
         state: &InferenceState,
         model_path: String,
         prefer_gpu: bool,
@@ -276,126 +277,142 @@ mod session_impl {
 
         #[cfg(target_os = "android")]
         {
-            log::info!(
-                "start_session (Android): would invoke Kotlin engine init — session_id={}",
-                session_id
-            );
-            // Kotlin IPC will be wired in the next slice
-        }
+            log::info!("start_session (Android): invoking Kotlin startSession — model_path={}", model_path);
+            let handle = app.state::<AndroidPluginHandle<R>>();
+            
+            let args = serde_json::json!({
+                "modelPath": model_path,
+                "preferGpu": prefer_gpu,
+            });
 
-        #[cfg(target_os = "ios")]
-        {
-            log::info!(
-                "start_session (iOS): would invoke Swift engine init — session_id={}",
-                session_id
-            );
-        }
+            let result: serde_json::Value = handle.0.run_mobile_plugin("startSession", args)
+                .map_err(|e| format!("Kotlin startSession failed: {}", e))?;
+            
+            let res_session_id = result.get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&session_id)
+                .to_string();
+            
+            let res_backend = result.get("backend")
+                .and_then(|v| v.as_str())
+                .unwrap_or(backend)
+                .to_string();
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            // Try to load the real LiteRT-LM engine via FFI.
-            // If the shared library is not found, fall back to echo mock.
-            let engine_result = match find_litertlm_library() {
-                Some(lib_path) => {
-                    log::info!(
-                        "start_session (desktop): loading LiteRT-LM engine — lib_path={}, model_path={}, backend={}",
-                        lib_path.display(), model_path, backend
-                    );
-                    match desktop::ffi::LitertEngine::new(&lib_path) {
-                        Ok(mut engine) => {
-                            match engine.load_model(&model_path, backend) {
-                                Ok(()) => {
-                                    log::info!(
-                                        "start_session (desktop): engine loaded successfully — model_path={}, backend={}",
-                                        model_path, backend
-                                    );
-                                    Ok(Some(engine))
-                                }
-                                Err(e) => {
-                                    log::error!(
-                                        "start_session (desktop): engine model load failed — {}. Falling back to echo mock.",
-                                        e
-                                    );
-                                    // Set error status briefly, then override to ready with mock
-                                    {
-                                        let mut status = state.session_status.lock().map_err(|e2| e2.to_string())?;
-                                        *status = SessionStatus::Error(format!("Model load failed: {}", e));
-                                    }
-                                    Ok(None)
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "start_session (desktop): LiteRT-LM library load failed — {}. Falling back to echo mock.",
-                                e
-                            );
-                            Ok(None)
-                        }
-                    }
-                }
-                None => {
-                    log::warn!(
-                        "start_session (desktop): litertlm_bridge library not found. \
-                         Falling back to echo mock. Build the C++ shim to enable real inference."
-                    );
-                    Ok(None)
-                }
+            let mut session = state.active_session.lock().map_err(|e| e.to_string())?;
+            *session = Some(LlmSessionGuard {
+                model_path: model_path.clone(),
+                backend: res_backend.clone(),
+                session_id: res_session_id.clone(),
+            });
+
+            let mut status = state.session_status.lock().map_err(|e| e.to_string())?;
+            *status = SessionStatus::Ready {
+                session_id: res_session_id.clone(),
+                backend: res_backend,
             };
 
-            match engine_result {
-                Ok(Some(engine)) => {
-                    // Real engine loaded — store it
-                    let mut litert = state.litert_engine.lock().map_err(|e| e.to_string())?;
-                    *litert = Some(engine);
-                    log::info!(
-                        "start_session (desktop): real inference engine active — session_id={}, backend={}",
-                        session_id, backend
-                    );
-                }
-                Ok(None) => {
-                    // Fallback to echo mock — no engine stored
-                    log::info!(
-                        "start_session (desktop mock): creating echo mock session — session_id={}",
-                        session_id
-                    );
-                }
-                Err(e) => return Err(e),
-            }
+            return Ok(res_session_id);
         }
 
-        let guard = LlmSessionGuard {
-            model_path: model_path.clone(),
-            backend: backend.to_string(),
-            session_id: session_id.clone(),
-        };
-        *state.active_session.lock().map_err(|e| e.to_string())? = Some(guard);
-
-        // Set status to Ready
+        #[cfg(not(target_os = "android"))]
         {
+            // Desktop/iOS fallback path
+            let session_id = generate_session_id();
+
+            #[cfg(target_os = "ios")]
+            {
+                log::info!(
+                    "start_session (iOS): would invoke Swift engine init — session_id={}",
+                    session_id
+                );
+            }
+
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                // Try to load the real LiteRT-LM engine via FFI.
+                // If the shared library is not found, fall back to echo mock.
+                let engine_result = match find_litertlm_library() {
+                    Some(lib_path) => {
+                        log::info!(
+                            "start_session (desktop): loading LiteRT-LM engine — lib_path={}, model_path={}, backend={}",
+                            lib_path.display(), model_path, backend
+                        );
+                        match desktop::ffi::LitertEngine::new(&lib_path) {
+                            Ok(mut engine) => {
+                                match engine.load_model(&model_path, backend) {
+                                    Ok(()) => {
+                                        log::info!(
+                                            "start_session (desktop): engine loaded successfully — model_path={}, backend={}",
+                                            model_path, backend
+                                        );
+                                        Ok(Some(engine))
+                                    }
+                                    Err(e) => {
+                                        log::error!(
+                                            "start_session (desktop): engine model load failed — {}. Falling back to echo mock.",
+                                            e
+                                        );
+                                        // Set error status briefly, then override to ready with mock
+                                        {
+                                            let mut status = state.session_status.lock().map_err(|e2| e2.to_string())?;
+                                            *status = SessionStatus::Error(format!("Model load failed: {}", e));
+                                        }
+                                        Ok(None)
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "start_session (desktop): FFI engine init failed — {}. Falling back to echo mock.",
+                                    e
+                                );
+                                Ok(None)
+                            }
+                        }
+                    }
+                    None => {
+                        log::info!("start_session (desktop): no LiteRT-LM native library found. Using echo mock.");
+                        Ok(None)
+                    }
+                };
+
+                match engine_result {
+                    Ok(engine) => {
+                        let mut litert = state.litert_engine.lock().map_err(|e| e.to_string())?;
+                        *litert = engine;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+
+            let mut session = state.active_session.lock().map_err(|e| e.to_string())?;
+            *session = Some(LlmSessionGuard {
+                model_path: model_path.clone(),
+                backend: backend.to_string(),
+                session_id: session_id.clone(),
+            });
+
             let mut status = state.session_status.lock().map_err(|e| e.to_string())?;
             *status = SessionStatus::Ready {
                 session_id: session_id.clone(),
                 backend: backend.to_string(),
             };
-        }
 
-        log::info!(
-            "start_session: session active — session_id={}, backend={}",
-            session_id,
-            backend
-        );
-        Ok(session_id)
+            return Ok(session_id);
+        }
     }
 
-    pub fn do_stop_session(state: &InferenceState) -> Result<(), String> {
+    pub fn do_stop_session<R: Runtime>(
+        app: &AppHandle<R>,
+        state: &InferenceState,
+    ) -> Result<(), String> {
         log::info!("stop_session: requesting session stop");
 
         let session = state
             .active_session
             .lock()
             .map_err(|e| e.to_string())?
-            .take();
+            .take(); // Atomic take: the session is stopped even if subsequent IPC fails
 
         if session.is_none() {
             log::warn!("stop_session: no active session to stop");
@@ -422,6 +439,14 @@ mod session_impl {
             }
         }
 
+        #[cfg(target_os = "android")]
+        {
+            log::info!("stop_session (Android): invoking Kotlin stopSession");
+            let handle = app.state::<AndroidPluginHandle<R>>();
+            handle.0.run_mobile_plugin::<serde_json::Value>("stopSession", serde_json::json!({}))
+                .map_err(|e| format!("Kotlin stopSession failed: {}", e))?;
+        }
+
         {
             let mut status = state.session_status.lock().map_err(|e| e.to_string())?;
             *status = SessionStatus::Idle;
@@ -430,7 +455,8 @@ mod session_impl {
         Ok(())
     }
 
-    pub fn do_send_message(
+    pub fn do_send_message<R: Runtime>(
+        app: &AppHandle<R>,
         state: &InferenceState,
         message: String,
     ) -> Result<String, String> {
@@ -445,8 +471,21 @@ mod session_impl {
 
         #[cfg(target_os = "android")]
         {
-            log::info!("send_message (Android): would invoke Kotlin inference — message_len={}", message.len());
-            Ok(format!("Android response for message of length {}", message.len()))
+            log::info!("send_message (Android): invoking Kotlin sendMessage — message_len={}", message.len());
+            let handle = app.state::<AndroidPluginHandle<R>>();
+            
+            let args = serde_json::json!({
+                "message": message,
+            });
+
+            let result: serde_json::Value = handle.0.run_mobile_plugin("sendMessage", args)
+                .map_err(|e| format!("Kotlin sendMessage failed: {}", e))?;
+            
+            let response = result.get("response")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Kotlin sendMessage returned no response string".to_string())?;
+            
+            return Ok(response.to_string());
         }
 
         #[cfg(target_os = "ios")]
@@ -694,6 +733,31 @@ mod session_impl {
         let status = state.session_status.lock().map_err(|e| e.to_string())?;
         Ok(status.clone())
     }
+
+    pub fn do_check_app_permissions<R: Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<serde_json::Value, String> {
+        #[cfg(target_os = "android")]
+        {
+            let handle = app.state::<AndroidPluginHandle<R>>();
+            handle.0.run_mobile_plugin("checkAppPermissions", serde_json::json!({}))
+                .map_err(|e| format!("Kotlin checkAppPermissions failed: {}", e))
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            // Desktop fallback: return a mock or actual status if we had one
+            Ok(serde_json::json!({
+                "success": true,
+                "data": {
+                    "accessibility_enabled": true,
+                    "accessibility_running": true,
+                    "notification_enabled": true,
+                    "foreground_service": true
+                }
+            }))
+        }
+    }
 }
 
 pub use session_impl::do_send_message;
@@ -708,30 +772,40 @@ mod android_commands {
     use super::*;
 
     #[tauri::command]
-    pub fn startSession(
+    pub fn startSession<R: Runtime>(
+        app: AppHandle<R>,
         state: State<'_, InferenceState>,
         model_path: String,
         prefer_gpu: bool,
     ) -> Result<String, String> {
-        session_impl::do_start_session(&state, model_path, prefer_gpu)
+        session_impl::do_start_session(&app, &state, model_path, prefer_gpu)
     }
 
     #[tauri::command]
-    pub fn stopSession(state: State<'_, InferenceState>) -> Result<(), String> {
-        session_impl::do_stop_session(&state)
+    pub fn stopSession<R: Runtime>(
+        app: AppHandle<R>,
+        state: State<'_, InferenceState>
+    ) -> Result<(), String> {
+        session_impl::do_stop_session(&app, &state)
     }
 
     #[tauri::command]
-    pub fn sendMessage(
+    pub fn sendMessage<R: Runtime>(
+        app: AppHandle<R>,
         state: State<'_, InferenceState>,
         message: String,
     ) -> Result<String, String> {
-        session_impl::do_send_message(&state, message)
+        session_impl::do_send_message(&app, &state, message)
     }
 
     #[tauri::command]
     pub fn getSessionStatus(state: State<'_, InferenceState>) -> Result<SessionStatus, String> {
         session_impl::do_get_session_status(&state)
+    }
+
+    #[tauri::command]
+    pub fn checkAppPermissions<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        session_impl::do_check_app_permissions(&app)
     }
 
     #[tauri::command]
@@ -1165,6 +1239,11 @@ mod desktop_commands {
             error: Some("Live Activities are not available on desktop".into()),
         }
     }
+
+    #[tauri::command]
+    pub fn checkAppPermissions<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        session_impl::do_check_app_permissions(&app)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1215,6 +1294,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             android_commands::stopSession,
             android_commands::sendMessage,
             android_commands::getSessionStatus,
+            android_commands::checkAppPermissions,
             android_commands::chat,
         ]);
 
@@ -1251,7 +1331,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             desktop_commands::get_screen_info,
             desktop_commands::find_node_info,
             desktop_commands::get_device_info,
-            desktop_commands::check_permissions,
+            desktop_commands::checkAppPermissions,
             desktop_commands::tap,
             desktop_commands::swipe,
             desktop_commands::long_press,

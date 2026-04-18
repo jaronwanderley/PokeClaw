@@ -463,26 +463,26 @@ impl AndroidToolExecutor {
     fn resolve_kotlin_command(tool_name: &str) -> Option<&'static str> {
         match tool_name {
             // Direct 1:1 mappings (tool name == @Command method name)
-            "get_screen_info" => Some("get_screen_info"),
-            "find_node_info" => Some("find_node_info"),
-            "input_text" => Some("input_text"),
-            "system_key" => Some("system_key"),
-            "open_app" => Some("open_app"),
-            "get_installed_apps" => Some("get_installed_apps"),
-            "take_screenshot" => Some("take_screenshot"),
+            "get_screen_info" => Some("getScreenInfo"),
+            "find_node_info" => Some("findNodeInfo"),
+            "input_text" => Some("inputText"),
+            "system_key" => Some("systemKey"),
+            "open_app" => Some("openApp"),
+            "get_installed_apps" => Some("getInstalledApps"),
+            "take_screenshot" => Some("takeScreenshot"),
             "clipboard" => Some("clipboard"),
-            "get_device_info" => Some("get_device_info"),
-            "get_notifications" => Some("get_notifications"),
-            "make_call" => Some("make_call"),
+            "get_device_info" => Some("getDeviceInfo"),
+            "get_notifications" => Some("getNotifications"),
+            "make_call" => Some("makeCall"),
             "tap" => Some("tap"),
-            "tap_node" => Some("tap_node"),
-            "long_press" => Some("long_press"),
+            "tap_node" => Some("tapNode"),
+            "long_press" => Some("longPress"),
             "swipe" => Some("swipe"),
-            "scroll_to_find" => Some("scroll_to_find"),
-            "find_and_tap" => Some("find_and_tap"),
+            "scroll_to_find" => Some("scrollToFind"),
+            "find_and_tap" => Some("findAndTap"),
 
             // Mapped names (LLM name ≠ Kotlin method name)
-            "send_message" => Some("send_chat_message"),
+            "send_message" => Some("sendChatMessage"),
 
             // No Kotlin @Command — these are handled by the Rust agent loop
             // or not yet implemented on Android

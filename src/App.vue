@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { useChat } from './composables/useChat'
 import { useModel } from './composables/useModel'
 import { useAccessibility } from './composables/useAccessibility'
@@ -20,6 +20,7 @@ const showSettings = ref(false)
 const showDebug = ref(false)
 const showPermissions = ref(false)
 const showTaskPanel = ref(false)
+const isAndroid = /android/i.test(navigator.userAgent)
 
 function scrollToBottom() {
   nextTick(() => {
@@ -48,6 +49,9 @@ function handleStartTask(text: string) {
   showTaskPanel.value = true
   startTask(text)
 }
+onMounted(() => {
+  console.log('[App] Mounted. sessionStatus:', sessionStatus.value, 'isAndroid:', isAndroid)
+})
 </script>
 
 <template>
@@ -60,7 +64,7 @@ function handleStartTask(text: string) {
         <div class="tb-t">Poke<b>Claw</b></div>
       </div>
       <div class="tb-right">
-        <div>v1.0.1</div>
+        <div>v1.0.3</div>
         <div v-if="sessionStatus === 'ready'" class="tb-b" :class="{ 'tb-gpu': preferGpu, 'tb-cpu': !preferGpu }">
           {{ preferGpu ? 'GPU' : 'CPU' }}
         </div>
@@ -108,6 +112,20 @@ function handleStartTask(text: string) {
         <MessageInput :disabled="isStreaming || taskStatus === 'running'" @send="sendMessage" @start-task="handleStartTask" />
       </div>
     </template>
+
+    <!-- Error state area -->
+    <div v-else-if="sessionStatus === 'error'" class="error-area">
+      <div class="error-icon">⚠️</div>
+      <div class="error-title">Erro na Sessão</div>
+      <div class="error-message">Ops! Algo deu errado ao carregar ou processar a sessão de IA.</div>
+      <button class="error-retry-btn" @click="setSessionStatus('idle')">Voltar e Tentar Novamente</button>
+    </div>
+
+    <!-- Catch-all / Not Initialized area -->
+    <div v-else class="loading-area">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Inicializando...</div>
+    </div>
 
     <!-- Debug: Accessibility Screen Info -->
     <div v-if="sessionStatus === 'ready'" class="debug-section">
@@ -424,5 +442,48 @@ function handleStartTask(text: string) {
   max-height: 200px;
   overflow-y: auto;
   margin: 0;
+}
+
+/* Error Area */
+.error-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  text-align: center;
+  gap: 12px;
+}
+
+.error-icon {
+  font-size: 48px;
+  margin-bottom: 8px;
+}
+
+.error-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e57373;
+}
+
+.error-message {
+  font-size: 14px;
+  color: var(--t2);
+  margin-bottom: 12px;
+}
+
+.error-retry-btn {
+  padding: 10px 20px;
+  background: var(--ai);
+  border: 1px solid var(--aib);
+  border-radius: 8px;
+  color: var(--t1);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.error-retry-btn:hover {
+  background: var(--surface);
 }
 </style>

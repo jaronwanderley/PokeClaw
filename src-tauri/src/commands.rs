@@ -116,15 +116,16 @@ pub struct TestAgentRoundRequest {
 }
 
 /// Execute one agent round: prompt → LLM → tool execution → result.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub async fn test_agent_round(
+pub async fn testAgentRound(
     app: AppHandle,
     state: State<'_, AgentState>,
     prompt: String,
-    system_prompt: Option<String>,
+    systemPrompt: Option<String>,
 ) -> Result<AgentRoundResult, String> {
     let start = Instant::now();
-    info!("test_agent_round: prompt='{}'", prompt);
+    info!("testAgentRound: prompt='{}'", prompt);
 
     // Validate prompt
     if prompt.trim().is_empty() {
@@ -144,12 +145,12 @@ pub async fn test_agent_round(
         match key_guard.clone() {
             Some(k) if !k.trim().is_empty() => k,
             _ => {
-                warn!("test_agent_round: OpenAI API key not set");
+                warn!("testAgentRound: OpenAI API key not set");
                 return Ok(AgentRoundResult {
                     prompt: prompt.clone(),
                     model: String::new(),
                     tool_call: None,
-                    response_text: Some("OpenAI API key not set. Use set_openai_api_key first.".into()),
+                    response_text: Some("OpenAI API key not set. Use setOpenAiApiKey first.".into()),
                     latency_ms: start.elapsed().as_millis() as u64,
                     token_usage: None,
                 });
@@ -171,10 +172,10 @@ pub async fn test_agent_round(
         })
         .collect();
 
-    info!("test_agent_round: {} tools loaded from registry", tool_schemas.len());
+    info!("testAgentRound: {} tools loaded from registry", tool_schemas.len());
 
     // Build messages
-    let system_text = system_prompt.unwrap_or_else(|| {
+    let system_text = systemPrompt.unwrap_or_else(|| {
         "You are a phone assistant. Use the available tools to help the user control their phone. \
          When the user asks you to do something, call the appropriate tool."
             .into()
@@ -260,9 +261,10 @@ pub async fn test_agent_round(
 // set_openai_api_key command
 // ---------------------------------------------------------------------------
 
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn set_openai_api_key(state: State<'_, AgentState>, key: String) -> Result<(), String> {
-    info!("set_openai_api_key: setting API key (length={})", key.len());
+pub fn setOpenAiApiKey(state: State<'_, AgentState>, key: String) -> Result<(), String> {
+    info!("setOpenAiApiKey: setting API key (length={})", key.len());
     let mut guard = state.openai_api_key.lock().map_err(|e| e.to_string())?;
     *guard = Some(key);
     Ok(())
@@ -272,9 +274,10 @@ pub fn set_openai_api_key(state: State<'_, AgentState>, key: String) -> Result<(
 // set_anthropic_api_key command
 // ---------------------------------------------------------------------------
 
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn set_anthropic_api_key(state: State<'_, AgentState>, key: String) -> Result<(), String> {
-    info!("set_anthropic_api_key: setting API key (length={})", key.len());
+pub fn setAnthropicApiKey(state: State<'_, AgentState>, key: String) -> Result<(), String> {
+    info!("setAnthropicApiKey: setting API key (length={})", key.len());
     let mut guard = state.anthropic_api_key.lock().map_err(|e| e.to_string())?;
     *guard = Some(key);
     Ok(())
@@ -284,15 +287,16 @@ pub fn set_anthropic_api_key(state: State<'_, AgentState>, key: String) -> Resul
 // set_llm_provider_type command
 // ---------------------------------------------------------------------------
 
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn set_llm_provider_type(state: State<'_, AgentState>, provider_type: String) -> Result<(), String> {
-    let ptype = match provider_type.to_lowercase().as_str() {
+pub fn setLlmProviderType(state: State<'_, AgentState>, providerType: String) -> Result<(), String> {
+    let ptype = match providerType.to_lowercase().as_str() {
         "openai" => LlmProviderType::OpenAi,
         "anthropic" => LlmProviderType::Anthropic,
         "local" => LlmProviderType::Local,
-        _ => return Err(format!("Unknown provider type: '{}'. Use 'openai', 'anthropic', or 'local'.", provider_type)),
+        _ => return Err(format!("Unknown provider type: '{}'. Use 'openai', 'anthropic', or 'local'.", providerType)),
     };
-    info!("set_llm_provider_type: switching to {:?}", ptype);
+    info!("setLlmProviderType: switching to {:?}", ptype);
     let mut guard = state.llm_provider_type.lock().map_err(|e| e.to_string())?;
     *guard = ptype;
     Ok(())
@@ -305,15 +309,16 @@ pub fn set_llm_provider_type(state: State<'_, AgentState>, provider_type: String
 /// Start a multi-round agent task. Returns immediately; events stream via
 /// the `on_event` Channel parameter. Rejects if a task is already running
 /// or if the OpenAI API key has not been set.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub async fn start_task(
+pub async fn startTask(
     app: AppHandle,
     state: State<'_, AgentState>,
     _inference_state: State<'_, InferenceState>,
     task: String,
-    on_event: Channel<TaskEvent>,
+    onEvent: Channel<TaskEvent>,
 ) -> Result<(), String> {
-    info!("start_task: request received — task='{}'", task);
+    info!("startTask: request received — task='{}'", task);
 
     // ── Guard: already running ────────────────────────────────────
     if state.task_running.load(Ordering::SeqCst) {
@@ -411,7 +416,7 @@ pub async fn start_task(
             );
 
             let executor = crate::agent::tool_executor::create_executor(&app);
-            let emitter = ChannelEventEmitter::new(on_event);
+            let emitter = ChannelEventEmitter::new(onEvent);
 
             // Emit events for frontend visibility
             emitter.emit(TaskEvent::LoopStart { round: 1 });
@@ -530,7 +535,7 @@ pub async fn start_task(
 
             tokio::spawn(async move {
                 let executor = crate::agent::tool_executor::create_executor(&app);
-                let emitter = ChannelEventEmitter::new(on_event);
+                let emitter = ChannelEventEmitter::new(onEvent);
 
                 // Emit LoopStart for frontend visibility
                 emitter.emit(TaskEvent::LoopStart { round: 1 });
@@ -616,12 +621,10 @@ pub async fn start_task(
                                 let key = api_key.as_ref().expect("Anthropic key validated above");
                                 Box::new(AnthropicProvider::new(key.clone(), model_name.clone()))
                             }
-                            LlmProviderType::Local => {
-                                Box::new(LocalProvider::with_fn(Arc::new(move |prompt| {
-                                    let state = app_clone.state::<InferenceState>();
-                                    tauri_plugin_pokeclaw::do_send_message(&state, prompt)
-                                })))
-                            }
+                            LlmProviderType::Local => Box::new(LocalProvider::with_fn(Arc::new(move |prompt| {
+                                        let state = app_clone.state::<InferenceState>();
+                                        tauri_plugin_pokeclaw::do_send_message(&app_clone, &state, prompt)
+                                    }))),
                         };
                         let agent_executor = crate::agent::tool_executor::create_executor(&app);
                         let registry = ToolRegistry::default();
@@ -675,7 +678,7 @@ pub async fn start_task(
                 LlmProviderType::Local => {
                     Box::new(LocalProvider::with_fn(Arc::new(move |prompt| {
                         let state = app_clone.state::<InferenceState>();
-                        tauri_plugin_pokeclaw::do_send_message(&state, prompt)
+                        tauri_plugin_pokeclaw::do_send_message(&app_clone, &state, prompt)
                     })))
                 }
             };
@@ -684,7 +687,7 @@ pub async fn start_task(
                 let executor = crate::agent::tool_executor::create_executor(&app);
                 let registry = ToolRegistry::default();
                 let config = AgentConfig::default();
-                let emitter = ChannelEventEmitter::new(on_event);
+                let emitter = ChannelEventEmitter::new(onEvent);
 
                 // Create guard registry for this task
                 let guards = Some(GuardRegistry::from_task(&agent_task));
@@ -728,19 +731,20 @@ pub async fn start_task(
 // ---------------------------------------------------------------------------
 
 /// Cancel the currently running agent task. Rejects if no task is running.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn cancel_task(state: State<'_, AgentState>) -> Result<(), String> {
-    info!("cancel_task: request received");
+pub fn cancelTask(state: State<'_, AgentState>) -> Result<(), String> {
+    info!("cancelTask: request received");
 
     if !state.task_running.load(Ordering::SeqCst) {
-        warn!("cancel_task: rejected — no task is running");
+        warn!("cancelTask: rejected — no task is running");
         return Err("No task is currently running.".to_string());
     }
 
     state
         .running_task_cancel
         .store(true, Ordering::SeqCst);
-    info!("cancel_task: cancel flag set");
+    info!("cancelTask: cancel flag set");
 
     Ok(())
 }
@@ -750,36 +754,38 @@ pub fn cancel_task(state: State<'_, AgentState>) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 /// Persist a chat message to the database. Returns the inserted row ID.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn save_chat_message(
+pub fn saveChatMessage(
     db: State<'_, Arc<std::sync::Mutex<Database>>>,
-    session_id: String,
+    sessionId: String,
     role: String,
     content: String,
     metadata: Option<String>,
 ) -> Result<i64, String> {
     info!(
-        "save_chat_message: session_id='{}', role='{}', content_len={}",
-        session_id,
+        "saveChatMessage: sessionId='{}', role='{}', content_len={}",
+        sessionId,
         role,
         content.len()
     );
     let db = db.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    let id = db.insert_chat_message(&session_id, &role, &content, metadata.as_deref())?;
-    info!("save_chat_message: inserted row id={}", id);
+    let id = db.insert_chat_message(&sessionId, &role, &content, metadata.as_deref())?;
+    info!("saveChatMessage: inserted row id={}", id);
     Ok(id)
 }
 
 /// Load all chat messages for a session, ordered by created_at ascending.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn load_chat_history(
+pub fn loadChatHistory(
     db: State<'_, Arc<std::sync::Mutex<Database>>>,
-    session_id: String,
+    sessionId: String,
 ) -> Result<Vec<ChatMessageRecord>, String> {
-    info!("load_chat_history: session_id='{}'", session_id);
+    info!("loadChatHistory: sessionId='{}'", sessionId);
     let db = db.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    let messages = db.list_chat_messages(&session_id)?;
-    info!("load_chat_history: returning {} messages", messages.len());
+    let messages = db.list_chat_messages(&sessionId)?;
+    info!("loadChatHistory: returning {} messages", messages.len());
     Ok(messages)
 }
 
@@ -788,28 +794,30 @@ pub fn load_chat_history(
 // ---------------------------------------------------------------------------
 
 /// Load recent task records, ordered by created_at descending.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn load_task_history(
+pub fn loadTaskHistory(
     state: State<'_, AgentState>,
     limit: Option<u32>,
 ) -> Result<Vec<TaskRecord>, String> {
     let limit = limit.unwrap_or(50);
-    info!("load_task_history: limit={}", limit);
+    info!("loadTaskHistory: limit={}", limit);
     let db = state.db.lock().map_err(|e| format!("DB lock error: {}", e))?;
     let tasks = db.list_tasks(limit as i64)?;
-    info!("load_task_history: returning {} tasks", tasks.len());
+    info!("loadTaskHistory: returning {} tasks", tasks.len());
     Ok(tasks)
 }
 
 /// Load all events for a specific task, ordered by created_at ascending.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn load_task_events(
+pub fn loadTaskEvents(
     state: State<'_, AgentState>,
-    task_id: i64,
+    taskId: i64,
 ) -> Result<Vec<TaskEventRecord>, String> {
-    info!("load_task_events: task_id={}", task_id);
+    info!("loadTaskEvents: taskId={}", taskId);
     let db = state.db.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    let events = db.list_task_events(task_id)?;
-    info!("load_task_events: returning {} events for task_id={}", events.len(), task_id);
+    let events = db.list_task_events(taskId)?;
+    info!("loadTaskEvents: returning {} events", events.len());
     Ok(events)
 }

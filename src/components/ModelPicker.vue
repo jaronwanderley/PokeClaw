@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useModel } from '../composables/useModel'
 
 const emit = defineEmits<{
@@ -7,25 +7,54 @@ const emit = defineEmits<{
 }>()
 
 const {
+  modelList,
+  isDownloading,
+  downloadPercent,
+  downloadProgress,
+  selectedModelPath,
+  preferGpu,
+  fetchModels,
+  pickModelFile,
+  downloadModel,
+  downloadFromUrl,
+  startSession,
   getSafFolderStatus,
   pickSafFolder,
   hasSafPermission,
   safFolderName,
 } = useModel()
 
+const isLoadingModels = ref(false)
+const modelFetchError = ref<string | null>(null)
+
 
 async function checkSafStatus() {
   if (isAndroid) {
-    const status = await getSafFolderStatus()
-    if (status.hasPermission) {
-      fetchModels()
+    isLoadingModels.value = true
+    modelFetchError.value = null
+    try {
+      const status = await getSafFolderStatus()
+      if (status.hasPermission) {
+        await fetchModels()
+      }
+    } catch (err) {
+      console.error('checkSafStatus failed:', err)
+      modelFetchError.value = String(err)
+    } finally {
+      isLoadingModels.value = false
     }
   } else {
-    fetchModels()
+    isLoadingModels.value = true
+    try {
+      await fetchModels()
+    } finally {
+      isLoadingModels.value = false
+    }
   }
 }
 
 onMounted(() => {
+  console.log('[ModelPicker] Mounted. isAndroid:', isAndroid)
   checkSafStatus()
 })
 
@@ -41,10 +70,6 @@ const urlInput = ref('')
 const showUrlPanel = ref(false)
 const urlError = ref<string | null>(null)
 
-const downloadPercent = computed(() => {
-  if (downloadProgress.value.totalBytes === 0) return 0
-  return Math.round((downloadProgress.value.bytesDownloaded / downloadProgress.value.totalBytes) * 100)
-})
 
 function formatSize(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`
@@ -250,44 +275,66 @@ function toggleUrlPanel() {
       </div>
     </div>
 
-    <!-- Model list from catalog -->
-    <div v-if="!isAndroid || hasSafPermission" class="model-list">
-      <div v-for="model in modelList" :key="model.id" class="model-card">
-        <div class="model-info">
-          <div class="model-name">{{ model.displayName }}</div>
-          <div class="model-meta">
-            {{ formatSize(model.sizeBytes) }} · {{ model.minRamGb }} GB RAM
-          </div>
-        </div>
-
-        <div v-if="isDownloading" class="download-progress">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: downloadPercent + '%' }"></div>
-          </div>
-          <div class="progress-text">{{ downloadPercent }}%</div>
-        </div>
-
-        <button
-          v-else-if="!model.isDownloaded"
-          class="action-btn download-btn"
-          :disabled="isDownloading"
-          @click="handleDownload(model.id)"
-        >
-          Download
-        </button>
-
-        <button
-          v-else
-          class="action-btn load-btn"
-          @click="handleLoad(model.localPath ?? model.fileName)"
-        >
-          Load
-        </button>
+    <!-- Model Catalog -->
+    <div class="catalog-section">
+      <h3 class="section-title">Modelos Disponíveis</h3>
+      
+      <div v-if="isLoadingModels" class="catalog-loading">
+        <div class="loading-spinner small"></div>
+        <span>Buscando modelos...</span>
       </div>
-    </div>
+      
+      <div v-else-if="modelFetchError" class="catalog-error">
+        <span>Erro ao carregar modelos: {{ modelFetchError }}</span>
+        <button @click="checkSafStatus">Tentar Novamente</button>
+      </div>
 
-    <div v-if="modelList.length === 0 && !isDownloading && !showUrlPanel" class="empty-state">
-      No models available. Tap "Download a model" to get started.
+      <div v-else-if="modelList.length === 0" class="catalog-empty">
+        <p v-if="isAndroid && hasSafPermission">
+          Nenhum arquivo .litertlm encontrado na pasta selecionada.
+        </p>
+        <p v-else-if="isAndroid">
+          Selecione uma pasta para listar os modelos.
+        </p>
+        <p v-else>
+          Nenhum modelo encontrado no diretório padrão.
+        </p>
+      </div>
+
+      <div v-else class="model-list">
+        <div v-for="model in modelList" :key="model.id" class="model-card">
+          <div class="model-info">
+            <div class="model-name">{{ model.displayName }}</div>
+            <div class="model-meta">
+              {{ formatSize(model.sizeBytes) }} · {{ model.minRamGb }} GB RAM
+            </div>
+          </div>
+
+          <div v-if="isDownloading" class="download-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: downloadPercent + '%' }"></div>
+            </div>
+            <div class="progress-text">{{ downloadPercent }}%</div>
+          </div>
+
+          <button
+            v-else-if="!model.isDownloaded"
+            class="action-btn download-btn"
+            :disabled="isDownloading"
+            @click="handleDownload(model.id)"
+          >
+            Download
+          </button>
+
+          <button
+            v-else
+            class="action-btn load-btn"
+            @click="handleLoad(model.localPath ?? model.fileName)"
+          >
+            Load
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -694,10 +741,49 @@ function toggleUrlPanel() {
   font-weight: 600;
 }
 
-.empty-state {
+.catalog-empty {
+  padding: 40px;
   text-align: center;
-  padding: 32px 16px;
-  color: var(--t2);
+  color: var(--t3);
   font-size: 14px;
+  background: var(--bg);
+  border-radius: 12px;
+  border: 1px dashed var(--border);
+}
+
+.catalog-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px;
+  color: var(--t3);
+}
+
+.catalog-error {
+  padding: 20px;
+  text-align: center;
+  color: #e57373;
+  background: rgba(229, 115, 115, 0.1);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.catalog-error button {
+  align-self: center;
+  padding: 6px 16px;
+  background: var(--ai);
+  border: 1px solid var(--aib);
+  border-radius: 6px;
+  color: var(--t1);
+  cursor: pointer;
+}
+
+.loading-spinner.small {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
 }
 </style>

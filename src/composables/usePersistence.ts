@@ -38,7 +38,7 @@ export async function saveChatMessage(
   content: string,
   metadata?: string,
 ): Promise<number> {
-  return invoke<number>('save_chat_message', {
+  return invoke<number>('saveChatMessage', {
     sessionId,
     role,
     content,
@@ -52,5 +52,5 @@ export async function saveChatMessage(
 export async function loadChatHistory(
   sessionId: string,
 ): Promise<ChatMessageRecord[]> {
-  return invoke<ChatMessageRecord[]>('load_chat_history', { sessionId })
+  return invoke<ChatMessageRecord[]>('loadChatHistory', { sessionId })
 }

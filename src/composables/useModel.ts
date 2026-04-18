@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { invoke, Channel } from '@tauri-apps/api/core'
 
 // ---------------------------------------------------------------------------
@@ -44,6 +44,11 @@ const preferGpu = ref(true)
 // Shared SAF state
 const hasSafPermission = ref(false)
 const safFolderName = ref('')
+
+const downloadPercent = computed(() => {
+  if (downloadProgress.value.totalBytes === 0) return 0
+  return Math.round((downloadProgress.value.bytesDownloaded / downloadProgress.value.totalBytes) * 100)
+})
 
 // ---------------------------------------------------------------------------
 // Platform detection
@@ -326,5 +331,6 @@ export function useModel() {
     listSafModels,
     hasSafPermission,
     safFolderName,
+    downloadPercent,
   }
 }

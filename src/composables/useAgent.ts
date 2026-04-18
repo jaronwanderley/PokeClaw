@@ -12,17 +12,17 @@ export interface ToolCallResult {
 }
 
 export interface TokenUsage {
-  prompt_tokens: number
-  completion_tokens: number
+  promptTokens: number
+  completionTokens: number
 }
 
 export interface AgentRoundResult {
   prompt: string
   model: string
-  tool_call: ToolCallResult | null
-  response_text: string | null
-  latency_ms: number
-  token_usage: TokenUsage | null
+  toolCall: ToolCallResult | null
+  responseText: string | null
+  latencyMs: number
+  tokenUsage: TokenUsage | null
 }
 
 const lastRoundResult = ref<AgentRoundResult | null>(null)
@@ -45,7 +45,7 @@ export function useAgent() {
 
     try {
       console.log('[useAgent] testAgentRound: prompt=' + prompt)
-      const result = await invoke<AgentRoundResult>('test_agent_round', {
+      const result = await invoke<AgentRoundResult>('testAgentRound', {
         prompt,
         systemPrompt: null,
       })
@@ -67,7 +67,7 @@ export function useAgent() {
    */
   async function setApiKey(key: string): Promise<boolean> {
     try {
-      await invoke('set_openai_api_key', { key })
+      await invoke('setOpenAiApiKey', { key })
       console.log('[useAgent] API key set successfully')
       return true
     } catch (err) {

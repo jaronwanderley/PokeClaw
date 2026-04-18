@@ -137,24 +137,24 @@ async function handleTestAgentRound() {
           </div>
           <div class="result-row">
             <span class="result-key">Latency:</span>
-            <span class="result-value">{{ lastRoundResult.latency_ms }}ms</span>
+            <span class="result-value">{{ lastRoundResult.latencyMs }}ms</span>
           </div>
-          <div v-if="lastRoundResult.tool_call" class="result-row">
+          <div v-if="lastRoundResult.toolCall" class="result-row">
             <span class="result-key">Tool:</span>
-            <span class="result-value">{{ lastRoundResult.tool_call.name }}</span>
+            <span class="result-value">{{ lastRoundResult.toolCall.name }}</span>
           </div>
-          <div v-if="lastRoundResult.tool_call" class="result-row">
+          <div v-if="lastRoundResult.toolCall" class="result-row">
             <span class="result-key">Tool Success:</span>
-            <span class="result-value">{{ lastRoundResult.tool_call.result.success ? '✓' : '✗' }}</span>
+            <span class="result-value">{{ lastRoundResult.toolCall.result.success ? '✓' : '✗' }}</span>
           </div>
-          <div v-if="lastRoundResult.response_text" class="result-row">
+          <div v-if="lastRoundResult.responseText" class="result-row">
             <span class="result-key">Response:</span>
-            <span class="result-value">{{ lastRoundResult.response_text }}</span>
+            <span class="result-value">{{ lastRoundResult.responseText }}</span>
           </div>
-          <div v-if="lastRoundResult.token_usage" class="result-row">
+          <div v-if="lastRoundResult.tokenUsage" class="result-row">
             <span class="result-key">Tokens:</span>
             <span class="result-value">
-              {{ lastRoundResult.token_usage.prompt_tokens }}+{{ lastRoundResult.token_usage.completion_tokens }}
+              {{ lastRoundResult.tokenUsage.promptTokens }}+{{ lastRoundResult.tokenUsage.completionTokens }}
             </span>
           </div>
         </div>

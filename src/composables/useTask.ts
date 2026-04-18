@@ -126,7 +126,7 @@ export function useTask() {
     taskStatus.value = 'running'
 
     try {
-      await invoke('start_task', { task, onEvent })
+      await invoke('startTask', { task, onEvent })
     } catch (err) {
       // invoke itself rejected (e.g. already running, no API key)
       taskError.value = String(err)
@@ -141,7 +141,7 @@ export function useTask() {
     if (taskStatus.value !== 'running') return
 
     try {
-      await invoke('cancel_task')
+      await invoke('cancelTask')
       // Status will be updated by the cancelled event from the backend,
       // but set optimistically in case the event doesn't arrive
       taskStatus.value = 'cancelled'
@@ -172,7 +172,7 @@ export function useTask() {
    */
   async function loadTaskHistory(limit?: number): Promise<TaskRecord[]> {
     try {
-      const records = await invoke<TaskRecord[]>('load_task_history', {
+      const records = await invoke<TaskRecord[]>('loadTaskHistory', {
         limit: limit ?? 20,
       })
       taskHistory.value = records

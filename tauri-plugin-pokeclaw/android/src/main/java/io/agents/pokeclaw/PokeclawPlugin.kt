@@ -56,6 +56,99 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         Log.e(TAG, "INIT: PokeclawPlugin loaded — activity=$activity")
     }
 
+    /**
+     * Start a new inference session with the given model path.
+     * Replaces any existing session.
+     *
+     * Returns: { sessionId: String, backend: String }
+     */
+    @Command
+    fun startSession(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val modelPath = args.getString("modelPath") ?: return invoke.reject("modelPath is required")
+        Log.i(TAG, "startSession called — modelPath=$modelPath")
+
+        streamingScope.launch(Dispatchers.IO) {
+            try {
+                // Initialise engine (takes ~2s on CPU)
+                val engine = acquireEngine(modelPath)
+                val conversation = createConversationWithRetry(engine, modelPath)
+
+                // Close existing session to release its Conversation
+                session?.close()
+
+                val newSession = InferenceSession(
+                    conversation = conversation,
+                    modelPath = modelPath,
+                    backendLabel = EngineHolder.getBackendLabel(modelPath) ?: "Unknown",
+                    sessionId = "sess-${System.currentTimeMillis().toString(16)}"
+                )
+                session = newSession
+
+                Log.i(TAG, "startSession: success — session ready (sessionId=${newSession.sessionId}, backend=${newSession.backendLabel})")
+                val result = JSObject()
+                result.put("sessionId", newSession.sessionId)
+                result.put("backend", newSession.backendLabel)
+                withContext(Dispatchers.Main) { invoke.resolve(result) }
+            } catch (e: Exception) {
+                Log.e(TAG, "startSession: failure — ${e.message}", e)
+                withContext(Dispatchers.Main) { invoke.reject("Failed to start session: ${e.message}") }
+            }
+        }
+    }
+
+    /**
+     * Send a message to the active inference engine. 
+     * Supports streaming via Channel (onEvent arg).
+     *
+     * Args: message (String), onEvent (Channel, optional)
+     * Returns (sync): { response: String }
+     */
+    @Command
+    fun sendMessage(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val message = args.getString("message") ?: return invoke.reject("message is required")
+        val channel = args.get("onEvent") as? Channel
+
+        Log.i(TAG, "sendMessage called — len=${message.length}, streaming=${channel != null}")
+
+        val currentSession = session ?: return invoke.reject("No active session. Call startSession first.")
+
+        streamingScope.launch(Dispatchers.IO) {
+            try {
+                currentSession.recordSend()
+
+                if (channel != null) {
+                    // For now, LiteRT-LM streaming is complex, use sync + single event
+                    val responseMsg = currentSession.conversation.sendMessage(message)
+                    val responseText = responseMsg.contents.toString()
+
+                    val event = JSObject()
+                    event.put("event", "token")
+                    event.put("data", JSObject().put("token", responseText))
+                    channel.send(event)
+
+                    val completeEvent = JSObject()
+                    completeEvent.put("event", "completed")
+                    channel.send(completeEvent)
+                    withContext(Dispatchers.Main) { invoke.resolve() }
+                } else {
+                    // Non-streaming inference
+                    val responseMsg = currentSession.conversation.sendMessage(message)
+                    val responseText = responseMsg.contents.toString()
+
+                    Log.i(TAG, "sendMessage: success — response_len=${responseText.length}")
+                    val result = JSObject()
+                    result.put("response", responseText)
+                    withContext(Dispatchers.Main) { invoke.resolve(result) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "sendMessage: general error — ${e.message}", e)
+                withContext(Dispatchers.Main) { invoke.reject("Inference failed: ${e.message}") }
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "PokeclawPlugin"
 
@@ -1169,7 +1262,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: true }
      */
     @Command
-    fun stop_session(invoke: Invoke) {
+    fun stopSession(invoke: Invoke) {
         Log.i(TAG, "stop_session")
 
         val currentSession = session
@@ -1205,7 +1298,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { state: "idle"|"loading"|"ready"|"error", model_path?, backend?, session_id?, error? }
      */
     @Command
-    fun get_session_status(invoke: Invoke) {
+    fun getSessionStatus(invoke: Invoke) {
         Log.d(TAG, "get_session_status")
 
         val result = JSObject()
@@ -1235,7 +1328,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: String?, error: String? }
      */
     @Command
-    fun get_screen_info(invoke: Invoke) {
+    fun getScreenInfo(invoke: Invoke) {
         Log.i(TAG, "get_screen_info: invoked")
 
         try {
@@ -1286,7 +1379,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Each node: { index, className, text, contentDescription, clickable, enabled, visible, bounds }
      */
     @Command
-    fun find_node_info(invoke: Invoke) {
+    fun findNodeInfo(invoke: Invoke) {
         val args = invoke.getArgs()
         val text = args.getString("text")
             ?: return invoke.reject("text is required")
@@ -1355,7 +1448,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: String, error: String? }
      */
     @Command
-    fun get_device_info(invoke: Invoke) {
+    fun getDeviceInfo(invoke: Invoke) {
         val args = invoke.getArgs()
         val category = args.getString("category")
             ?: return invoke.reject("category is required")
@@ -1405,8 +1498,8 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: { accessibility_enabled, accessibility_running, notification_enabled, foreground_service }, error: String? }
      */
     @Command
-    fun check_permissions(invoke: Invoke) {
-        Log.i(TAG, "check_permissions: invoked")
+    fun checkAppPermissions(invoke: Invoke) {
+        Log.i(TAG, "checkAppPermissions: invoked")
 
         try {
             val notificationEnabled = try {
@@ -1491,7 +1584,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: String?, error: String? }
      */
     @Command
-    fun system_key(invoke: Invoke) {
+    fun systemKey(invoke: Invoke) {
         val args = invoke.getArgs()
         val action = args.getString("action")
             ?.lowercase()?.trim()
@@ -1560,7 +1653,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: String?, error: String? }
      */
     @Command
-    fun open_app(invoke: Invoke) {
+    fun openApp(invoke: Invoke) {
         val args = invoke.getArgs()
         val appName = args.getString("app_name")
             ?.trim()
@@ -1642,7 +1735,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Each notification: { package_name, key, post_time, ticker_text, is_ongoing, is_clearable }
      */
     @Command
-    fun get_notifications(invoke: Invoke) {
+    fun getNotifications(invoke: Invoke) {
         Log.i(TAG, "get_notifications: invoked")
 
         try {
@@ -1794,7 +1887,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: [{ package_name, app_name, is_system }], error: String? }
      */
     @Command
-    fun get_installed_apps(invoke: Invoke) {
+    fun getInstalledApps(invoke: Invoke) {
         val args = invoke.getArgs()
         val filter = args.optString("filter", null)?.lowercase()?.trim()
 
@@ -1858,7 +1951,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: String?, error: String? }
      */
     @Command
-    fun make_call(invoke: Invoke) {
+    fun makeCall(invoke: Invoke) {
         val args = invoke.getArgs()
         val contact = args.getString("contact")
             ?.trim()
@@ -1919,7 +2012,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: { opened: String }, error: String? }
      */
     @Command
-    fun open_permission_settings(invoke: Invoke) {
+    fun openPermissionSettings(invoke: Invoke) {
         val args = invoke.getArgs()
         val target = args.getString("target")
             ?.trim()
@@ -1971,7 +2064,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: String (file path), error: String? }
      */
     @Command
-    fun take_screenshot(invoke: Invoke) {
+    fun takeScreenshot(invoke: Invoke) {
         Log.i(TAG, "take_screenshot: invoked")
 
         try {
@@ -2043,7 +2136,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      * Returns: { success: Boolean, data: String?, error: String? }
      */
     @Command
-    fun send_chat_message(invoke: Invoke) {
+    fun sendChatMessage(invoke: Invoke) {
         val args = invoke.getArgs()
         val appName = args.getString("app_name")
             ?.trim()

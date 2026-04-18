@@ -82,16 +82,16 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::test_agent_round,
-            commands::set_openai_api_key,
-            commands::set_anthropic_api_key,
-            commands::set_llm_provider_type,
-            commands::start_task,
-            commands::cancel_task,
-            commands::save_chat_message,
-            commands::load_chat_history,
-            commands::load_task_history,
-            commands::load_task_events,
+            commands::testAgentRound,
+            commands::setOpenAiApiKey,
+            commands::setAnthropicApiKey,
+            commands::setLlmProviderType,
+            commands::startTask,
+            commands::cancelTask,
+            commands::saveChatMessage,
+            commands::loadChatHistory,
+            commands::loadTaskHistory,
+            commands::loadTaskEvents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

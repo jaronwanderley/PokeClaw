@@ -8,10 +8,10 @@ export interface ToolResult {
 }
 
 export interface PermissionStatus {
-  accessibility_enabled: boolean
-  accessibility_running: boolean
-  notification_enabled: boolean
-  foreground_service: boolean
+  accessibilityEnabled: boolean
+  accessibilityRunning: boolean
+  notificationEnabled: boolean
+  foregroundService: boolean
 }
 
 const screenTree = ref('')
@@ -27,11 +27,11 @@ export function useAccessibility() {
     isLoading.value = true
     error.value = null
     try {
-      const result = await invoke<ToolResult>('get_screen_info')
+      const result = await invoke<ToolResult>('plugin:pokeclaw|getScreenInfo')
       if (result.success && result.data) {
         screenTree.value = (result.data as Record<string, unknown>).tree as string
       } else {
-        error.value = result.error ?? 'get_screen_info returned failure with no error message'
+        error.value = result.error ?? 'getScreenInfo returned failure'
         screenTree.value = ''
       }
     } catch (err) {
@@ -49,11 +49,11 @@ export function useAccessibility() {
   async function checkPermissions(): Promise<PermissionStatus | null> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('check_permissions')
+      const result = await invoke<ToolResult>('plugin:pokeclaw|checkAppPermissions')
       if (result.success && result.data) {
         return result.data as unknown as PermissionStatus
       } else {
-        error.value = result.error ?? 'check_permissions returned failure'
+        error.value = result.error ?? 'checkPermissions returned failure'
         return null
       }
     } catch (err) {
@@ -68,11 +68,11 @@ export function useAccessibility() {
   async function findNodeInfo(text: string): Promise<Record<string, unknown>[] | null> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('find_node_info', { text })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|findNodeInfo', { text })
       if (result.success && result.data) {
         return (result.data as Record<string, unknown>).nodes as Record<string, unknown>[]
       } else {
-        error.value = result.error ?? 'find_node_info returned failure'
+        error.value = result.error ?? 'findNodeInfo returned failure'
         return null
       }
     } catch (err) {
@@ -88,11 +88,11 @@ export function useAccessibility() {
   async function getDeviceInfo(category: string): Promise<string | null> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('get_device_info', { category })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|getDeviceInfo', { category })
       if (result.success && result.data) {
         return (result.data as Record<string, unknown>).info as string
       } else {
-        error.value = result.error ?? 'get_device_info returned failure'
+        error.value = result.error ?? 'getDeviceInfo returned failure'
         return null
       }
     } catch (err) {
@@ -111,7 +111,7 @@ export function useAccessibility() {
   async function tap(x: number, y: number): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('tap', { x, y })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|tap', { x, y })
       if (!result.success) {
         error.value = result.error ?? 'tap returned failure'
       }
@@ -134,12 +134,12 @@ export function useAccessibility() {
   ): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('swipe', {
-        start_x: startX,
-        start_y: startY,
-        end_x: endX,
-        end_y: endY,
-        duration_ms: durationMs,
+      const result = await invoke<ToolResult>('plugin:pokeclaw|swipe', {
+        startX,
+        startY,
+        endX,
+        endY,
+        durationMs,
       })
       if (!result.success) {
         error.value = result.error ?? 'swipe returned failure'
@@ -157,13 +157,13 @@ export function useAccessibility() {
   async function longPress(x: number, y: number, durationMs?: number): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('long_press', {
+      const result = await invoke<ToolResult>('plugin:pokeclaw|longPress', {
         x,
         y,
-        duration_ms: durationMs,
+        durationMs,
       })
       if (!result.success) {
-        error.value = result.error ?? 'long_press returned failure'
+        error.value = result.error ?? 'longPress returned failure'
       }
       return result
     } catch (err) {
@@ -178,9 +178,9 @@ export function useAccessibility() {
   async function tapNode(nodeId: string): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('tap_node', { node_id: nodeId })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|tapNode', { nodeId })
       if (!result.success) {
-        error.value = result.error ?? 'tap_node returned failure'
+        error.value = result.error ?? 'tapNode returned failure'
       }
       return result
     } catch (err) {
@@ -199,13 +199,13 @@ export function useAccessibility() {
   ): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('input_text', {
+      const result = await invoke<ToolResult>('plugin:pokeclaw|inputText', {
         text,
-        node_id: nodeId,
-        clear_first: clearFirst,
+        nodeId,
+        clearFirst,
       })
       if (!result.success) {
-        error.value = result.error ?? 'input_text returned failure'
+        error.value = result.error ?? 'inputText returned failure'
       }
       return result
     } catch (err) {
@@ -224,13 +224,13 @@ export function useAccessibility() {
   ): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('scroll_to_find', {
+      const result = await invoke<ToolResult>('plugin:pokeclaw|scrollToFind', {
         text,
         direction,
-        max_scrolls: maxScrolls,
+        maxScrolls,
       })
       if (!result.success) {
-        error.value = result.error ?? 'scroll_to_find returned failure'
+        error.value = result.error ?? 'scrollToFind returned failure'
       }
       return result
     } catch (err) {
@@ -249,13 +249,13 @@ export function useAccessibility() {
   ): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('find_and_tap', {
+      const result = await invoke<ToolResult>('plugin:pokeclaw|findAndTap', {
         text,
         direction,
-        max_scrolls: maxScrolls,
+        maxScrolls,
       })
       if (!result.success) {
-        error.value = result.error ?? 'find_and_tap returned failure'
+        error.value = result.error ?? 'findAndTap returned failure'
       }
       return result
     } catch (err) {
@@ -275,11 +275,11 @@ export function useAccessibility() {
   async function getNotifications(): Promise<Record<string, unknown>[] | null> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('get_notifications')
+      const result = await invoke<ToolResult>('plugin:pokeclaw|getNotifications')
       if (result.success && result.data) {
         return (result.data as Record<string, unknown>).notifications as Record<string, unknown>[]
       } else {
-        error.value = result.error ?? 'get_notifications returned failure'
+        error.value = result.error ?? 'getNotifications returned failure'
         return null
       }
     } catch (err) {
@@ -295,9 +295,9 @@ export function useAccessibility() {
   async function openApp(appName: string): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('open_app', { app_name: appName })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|openApp', { appName })
       if (!result.success) {
-        error.value = result.error ?? 'open_app returned failure'
+        error.value = result.error ?? 'openApp returned failure'
       }
       return result
     } catch (err) {
@@ -313,9 +313,9 @@ export function useAccessibility() {
   async function systemKey(action: string): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('system_key', { action })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|systemKey', { action })
       if (!result.success) {
-        error.value = result.error ?? 'system_key returned failure'
+        error.value = result.error ?? 'systemKey returned failure'
       }
       return result
     } catch (err) {
@@ -335,9 +335,9 @@ export function useAccessibility() {
   ): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('send_chat_message', { app, contact, message })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|sendChatMessage', { app, contact, message })
       if (!result.success) {
-        error.value = result.error ?? 'send_chat_message returned failure'
+        error.value = result.error ?? 'sendChatMessage returned failure'
       }
       return result
     } catch (err) {
@@ -353,9 +353,9 @@ export function useAccessibility() {
   async function takeScreenshot(filePath?: string): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('take_screenshot', { file_path: filePath })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|takeScreenshot', { filePath })
       if (!result.success) {
-        error.value = result.error ?? 'take_screenshot returned failure'
+        error.value = result.error ?? 'takeScreenshot returned failure'
       }
       return result
     } catch (err) {
@@ -372,7 +372,7 @@ export function useAccessibility() {
   async function clipboard(action: string, text?: string): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('clipboard', { action, text })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|clipboard', { action, text })
       if (!result.success) {
         error.value = result.error ?? 'clipboard returned failure'
       }
@@ -389,11 +389,11 @@ export function useAccessibility() {
   async function getInstalledApps(filter?: string): Promise<Record<string, unknown>[] | null> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('get_installed_apps', { filter })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|getInstalledApps', { filter })
       if (result.success && result.data) {
         return (result.data as Record<string, unknown>).apps as Record<string, unknown>[]
       } else {
-        error.value = result.error ?? 'get_installed_apps returned failure'
+        error.value = result.error ?? 'getInstalledApps returned failure'
         return null
       }
     } catch (err) {
@@ -409,9 +409,9 @@ export function useAccessibility() {
   async function openPermissionSettings(target: string): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('open_permission_settings', { target })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|openPermissionSettings', { target })
       if (!result.success) {
-        error.value = result.error ?? 'open_permission_settings returned failure'
+        error.value = result.error ?? 'openPermissionSettings returned failure'
       }
       return result
     } catch (err) {
@@ -426,9 +426,9 @@ export function useAccessibility() {
   async function makeCall(target: string): Promise<ToolResult> {
     error.value = null
     try {
-      const result = await invoke<ToolResult>('make_call', { target })
+      const result = await invoke<ToolResult>('plugin:pokeclaw|makeCall', { target })
       if (!result.success) {
-        error.value = result.error ?? 'make_call returned failure'
+        error.value = result.error ?? 'makeCall returned failure'
       }
       return result
     } catch (err) {
