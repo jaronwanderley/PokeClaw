@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-pickSaveLocation"
+description = "Enables the pickSaveLocation command without any pre-configured scope."
+commands.allow = ["pickSaveLocation"]
+
+[[permission]]
+identifier = "deny-pickSaveLocation"
+description = "Denies the pickSaveLocation command without any pre-configured scope."
+commands.deny = ["pickSaveLocation"]

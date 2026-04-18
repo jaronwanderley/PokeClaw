@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-getScreenInfo"
+description = "Enables the getScreenInfo command without any pre-configured scope."
+commands.allow = ["getScreenInfo"]
+
+[[permission]]
+identifier = "deny-getScreenInfo"
+description = "Denies the getScreenInfo command without any pre-configured scope."
+commands.deny = ["getScreenInfo"]

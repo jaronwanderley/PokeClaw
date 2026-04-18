@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-scrollToFind"
+description = "Enables the scrollToFind command without any pre-configured scope."
+commands.allow = ["scrollToFind"]
+
+[[permission]]
+identifier = "deny-scrollToFind"
+description = "Denies the scrollToFind command without any pre-configured scope."
+commands.deny = ["scrollToFind"]

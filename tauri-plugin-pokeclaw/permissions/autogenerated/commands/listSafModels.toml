@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-listSafModels"
+description = "Enables the listSafModels command without any pre-configured scope."
+commands.allow = ["listSafModels"]
+
+[[permission]]
+identifier = "deny-listSafModels"
+description = "Denies the listSafModels command without any pre-configured scope."
+commands.deny = ["listSafModels"]

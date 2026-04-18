@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-updateLiveActivity"
+description = "Enables the updateLiveActivity command without any pre-configured scope."
+commands.allow = ["updateLiveActivity"]
+
+[[permission]]
+identifier = "deny-updateLiveActivity"
+description = "Denies the updateLiveActivity command without any pre-configured scope."
+commands.deny = ["updateLiveActivity"]

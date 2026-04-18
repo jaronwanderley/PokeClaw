@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-pick-model-file"
+description = "Enables the pick_model_file command without any pre-configured scope."
+commands.allow = ["pick_model_file"]
+
+[[permission]]
+identifier = "deny-pick-model-file"
+description = "Denies the pick_model_file command without any pre-configured scope."
+commands.deny = ["pick_model_file"]

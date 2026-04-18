@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-downloadToSafFolder"
+description = "Enables the downloadToSafFolder command without any pre-configured scope."
+commands.allow = ["downloadToSafFolder"]
+
+[[permission]]
+identifier = "deny-downloadToSafFolder"
+description = "Denies the downloadToSafFolder command without any pre-configured scope."
+commands.deny = ["downloadToSafFolder"]

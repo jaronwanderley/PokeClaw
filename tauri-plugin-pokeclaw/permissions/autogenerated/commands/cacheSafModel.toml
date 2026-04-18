@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-cacheSafModel"
+description = "Enables the cacheSafModel command without any pre-configured scope."
+commands.allow = ["cacheSafModel"]
+
+[[permission]]
+identifier = "deny-cacheSafModel"
+description = "Denies the cacheSafModel command without any pre-configured scope."
+commands.deny = ["cacheSafModel"]

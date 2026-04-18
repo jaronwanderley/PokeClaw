@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-tapNode"
+description = "Enables the tapNode command without any pre-configured scope."
+commands.allow = ["tapNode"]
+
+[[permission]]
+identifier = "deny-tapNode"
+description = "Denies the tapNode command without any pre-configured scope."
+commands.deny = ["tapNode"]

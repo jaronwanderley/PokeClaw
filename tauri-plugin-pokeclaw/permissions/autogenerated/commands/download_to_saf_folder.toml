@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-download-to-saf-folder"
+description = "Enables the download_to_saf_folder command without any pre-configured scope."
+commands.allow = ["download_to_saf_folder"]
+
+[[permission]]
+identifier = "deny-download-to-saf-folder"
+description = "Denies the download_to_saf_folder command without any pre-configured scope."
+commands.deny = ["download_to_saf_folder"]

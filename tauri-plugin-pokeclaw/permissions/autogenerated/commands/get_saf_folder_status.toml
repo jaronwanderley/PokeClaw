@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-get-saf-folder-status"
+description = "Enables the get_saf_folder_status command without any pre-configured scope."
+commands.allow = ["get_saf_folder_status"]
+
+[[permission]]
+identifier = "deny-get-saf-folder-status"
+description = "Denies the get_saf_folder_status command without any pre-configured scope."
+commands.deny = ["get_saf_folder_status"]

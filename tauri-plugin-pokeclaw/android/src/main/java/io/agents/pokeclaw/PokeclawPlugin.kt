@@ -1,10 +1,15 @@
 package io.agents.pokeclaw
 
 import android.app.Activity
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.Context
+import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiInfo
@@ -12,7 +17,6 @@ import android.net.wifi.WifiManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
@@ -22,9 +26,11 @@ import android.os.StatFs
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
+import androidx.activity.result.ActivityResult
 import app.tauri.plugin.Channel
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -32,17 +38,23 @@ import app.tauri.plugin.Invoke
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
-import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.Engine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.content.SharedPreferences
 
 @TauriPlugin
 class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
+    init {
+        Log.e(TAG, "INIT: PokeclawPlugin loaded — activity=$activity")
+    }
 
     companion object {
         private const val TAG = "PokeclawPlugin"
@@ -61,6 +73,16 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
         /** Approximate chars per token for batch-size calculations. */
         private const val CHARS_PER_TOKEN = 4
+
+        /** SAF request code for save-location picker. */
+        private const val REQUEST_CODE_SAVE = 10001
+
+        /** SAF request code for file-open picker. */
+        private const val REQUEST_CODE_OPEN = 10002
+
+        /** SharedPreferences key for persisted SAF folder URI. */
+        private const val PREFS_NAME = "pokeclaw_saf"
+        private const val KEY_SAF_FOLDER_URI = "saf_folder_uri"
     }
 
     /** Args class for send_message with streaming Channel support. */
@@ -78,6 +100,14 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         lateinit var onProgress: Channel
     }
 
+    /** Args class for download_model_from_url with streaming Channel for progress. */
+    @InvokeArg
+    inner class DownloadModelFromUrlArgs {
+        lateinit var url: String
+        lateinit var saveDir: String
+        lateinit var onProgress: Channel
+    }
+
     /** Active inference session, null when idle. */
     private var session: InferenceSession? = null
 
@@ -86,6 +116,21 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
     /** Coroutine scope for streaming inference, cancelled in onDestroy(). */
     private val streamingScope = CoroutineScope(Dispatchers.Default + Job())
+
+    // -----------------------------------------------------------------------
+    // SAF (Storage Access Framework) state
+    // -----------------------------------------------------------------------
+
+    /** SharedPreferences for persisting SAF folder URI across sessions. */
+    private val safPrefs: SharedPreferences by lazy {
+        activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    /** Persisted SAF folder URI, null if user hasn't picked one yet. */
+    private val persistedSafFolderUri: String?
+        get() = safPrefs.getString(KEY_SAF_FOLDER_URI, null)
+
+    /** SAF request codes — defined in main companion object above. */
 
     // -----------------------------------------------------------------------
     // @Command methods — invoked from JS via Tauri plugin IPC
@@ -123,10 +168,8 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
         try {
             // Acquire engine with GPU/CPU backend selection + fallback
-            val cacheDir = activity.cacheDir.absolutePath
-            val backend = selectBackend(preferGpu)
-            val engine = EngineHolder.getOrCreate(modelPath, cacheDir, backend)
-            val backendLabel = EngineHolder.getBackendLabel(modelPath) ?: backendLabel(backend)
+            val engine = acquireEngine(modelPath)
+            val backendLabel = EngineHolder.getBackendLabel() ?: "unknown"
 
             // Create conversation with retry logic
             val conversation = createConversationWithRetry(engine, modelPath)
@@ -176,7 +219,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         try {
             args = invoke.parseArgs(SendMessageArgs::class.java)
         } catch (e: Exception) {
-            return invoke.reject("Invalid arguments: ${e.message}", e)
+            return invoke.reject("Invalid arguments: ${e.message}")
         }
 
         val message = args.message
@@ -203,178 +246,135 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "send_message: failed to recreate conversation: ${e.message}")
-                return invoke.reject("Failed to recreate conversation: ${e.message}", e)
+                return invoke.reject("Failed to recreate conversation: ${e.message}")
             }
         }
 
         val activeSession = session!!
 
-        Log.i(TAG, "send_message: starting async streaming inference")
+        Log.i(TAG, "send_message: starting async streaming inference via Flow API")
 
         // Launch streaming on a coroutine — this method returns immediately
         streamingScope.launch(streamingScope.coroutineContext) {
             val fullText = StringBuilder()
             val batchBuffer = StringBuilder()
             var batchIndex = 0
-            var accumulatedLength = 0
             val batchThreshold = batchSize * CHARS_PER_TOKEN
 
             try {
-                activeSession.conversation.sendMessageAsync(
-                    message,
-                    object : MessageCallback {
-                        override fun onMessage(msg: com.google.ai.edge.litertlm.Message) {
-                            val newText = msg?.toString() ?: ""
-                            if (newText.isEmpty()) return
+                // LiteRT-LM v0.10+ Flow-based API: sendMessageAsync returns Flow<Message>
+                activeSession.conversation.sendMessageAsync(message)
+                    .catch { throwable ->
+                        Log.e(TAG, "send_message: streaming error — ${throwable.message}")
 
-                            // Detect token granularity: accumulated vs incremental
-                            val delta: String
-                            if (newText.length > accumulatedLength) {
-                                // Accumulated mode — extract just the new part
-                                delta = newText.substring(accumulatedLength)
-                                accumulatedLength = newText.length
-                            } else {
-                                // Incremental mode — use the full text as the delta
-                                delta = newText
-                                accumulatedLength += newText.length
-                            }
-
-                            fullText.append(delta)
-                            batchBuffer.append(delta)
-
-                            // Send batch when buffer exceeds threshold
-                            if (batchBuffer.length >= batchThreshold) {
-                                sendTokenBatch(channel, batchBuffer.toString(), batchIndex)
-                                Log.d(TAG, "send_message: batch $batchIndex sent (${batchBuffer.length} chars)")
-                                batchIndex++
-                                batchBuffer.clear()
-                            }
-                        }
-
-                        override fun onDone() {
-                            // Flush remaining buffered text
-                            if (batchBuffer.isNotEmpty()) {
-                                sendTokenBatch(channel, batchBuffer.toString(), batchIndex)
-                                Log.d(TAG, "send_message: final batch $batchIndex sent (${batchBuffer.length} chars)")
-                                batchIndex++
-                                batchBuffer.clear()
-                            }
-
-                            val finalText = fullText.toString()
-                            val tokenCount = finalText.length / CHARS_PER_TOKEN
-                            activeSession.recordSend()
-
-                            // Send complete event
+                        // GPU failure during streaming — attempt CPU fallback and retry
+                        if (!gpuFailed && isGpuBackendFailure(throwable)) {
+                            Log.w(TAG, "send_message: GPU failure during streaming, attempting CPU fallback")
                             try {
-                                val completeData = JSObject()
-                                completeData.put("full_text", finalText)
-                                completeData.put("token_count", tokenCount)
-                                val completeEvent = JSObject()
-                                completeEvent.put("event", "complete")
-                                completeEvent.put("data", completeData)
-                                channel.send(completeEvent)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "send_message: failed to send complete event: ${e.message}")
-                            }
+                                fallbackToCpu(activeSession.modelPath)
+                                val retrySession = session!!
+                                val retryFullText = StringBuilder()
+                                val retryBuffer = StringBuilder()
+                                var retryBatchIndex = 0
 
-                            Log.i(TAG, "send_message: complete — ${finalText.length} chars, $batchIndex batches, ~$tokenCount tokens")
-                            invoke.resolve()
-                        }
+                                retrySession.conversation.sendMessageAsync(message)
+                                    .collect { msg ->
+                                        val newText = msg.toString()
+                                        if (newText.isEmpty()) return@collect
 
-                        override fun onError(throwable: Throwable) {
-                            Log.e(TAG, "send_message: streaming error — ${throwable.message}")
+                                        retryFullText.append(newText)
+                                        retryBuffer.append(newText)
 
-                            // GPU failure during streaming — attempt CPU fallback and retry
-                            if (!gpuFailed && isGpuBackendFailure(throwable)) {
-                                Log.w(TAG, "send_message: GPU failure during streaming, attempting CPU fallback")
-                                try {
-                                    fallbackToCpu(activeSession.modelPath)
-                                    // Retry streaming on the new CPU conversation
-                                    val retrySession = session!!
-                                    val retryFullText = StringBuilder()
-                                    val retryBuffer = StringBuilder()
-                                    var retryBatchIndex = 0
-                                    var retryAccumulatedLength = 0
+                                        if (retryBuffer.length >= batchThreshold) {
+                                            sendTokenBatch(channel, retryBuffer.toString(), retryBatchIndex)
+                                            Log.d(TAG, "send_message: CPU retry batch $retryBatchIndex sent (${retryBuffer.length} chars)")
+                                            retryBatchIndex++
+                                            retryBuffer.clear()
+                                        }
+                                    }
 
-                                    retrySession.conversation.sendMessageAsync(
-                                        message,
-                                        object : MessageCallback {
-                                            override fun onMessage(msg: com.google.ai.edge.litertlm.Message) {
-                                                val newText = msg?.toString() ?: ""
-                                                if (newText.isEmpty()) return
-
-                                                val delta: String
-                                                if (newText.length > retryAccumulatedLength) {
-                                                    delta = newText.substring(retryAccumulatedLength)
-                                                    retryAccumulatedLength = newText.length
-                                                } else {
-                                                    delta = newText
-                                                    retryAccumulatedLength += newText.length
-                                                }
-
-                                                retryFullText.append(delta)
-                                                retryBuffer.append(delta)
-
-                                                if (retryBuffer.length >= batchThreshold) {
-                                                    sendTokenBatch(channel, retryBuffer.toString(), retryBatchIndex)
-                                                    Log.d(TAG, "send_message: CPU retry batch $retryBatchIndex sent (${retryBuffer.length} chars)")
-                                                    retryBatchIndex++
-                                                    retryBuffer.clear()
-                                                }
-                                            }
-
-                                            override fun onDone() {
-                                                if (retryBuffer.isNotEmpty()) {
-                                                    sendTokenBatch(channel, retryBuffer.toString(), retryBatchIndex)
-                                                    retryBatchIndex++
-                                                    retryBuffer.clear()
-                                                }
-
-                                                val finalText = retryFullText.toString()
-                                                val tokenCount = finalText.length / CHARS_PER_TOKEN
-                                                retrySession.recordSend()
-
-                                                try {
-                                                    val completeData = JSObject()
-                                                    completeData.put("full_text", finalText)
-                                                    completeData.put("token_count", tokenCount)
-                                                    val completeEvent = JSObject()
-                                                    completeEvent.put("event", "complete")
-                                                    completeEvent.put("data", completeData)
-                                                    channel.send(completeEvent)
-                                                } catch (e: Exception) {
-                                                    Log.w(TAG, "send_message: failed to send CPU retry complete event: ${e.message}")
-                                                }
-
-                                                Log.i(TAG, "send_message: CPU retry complete — ${finalText.length} chars, $retryBatchIndex batches")
-                                                invoke.resolve()
-                                            }
-
-                                            override fun onError(retryError: Throwable) {
-                                                Log.e(TAG, "send_message: CPU retry also failed: ${retryError.message}")
-                                                sendErrorEvent(channel, "Inference failed even after CPU fallback: ${retryError.message}")
-                                                invoke.reject("Inference failed even after CPU fallback: ${retryError.message}", retryError)
-                                            }
-                                        },
-                                        null as? java.util.Map<String, Any>
-                                    )
-                                } catch (fallbackErr: Exception) {
-                                    Log.e(TAG, "send_message: CPU fallback failed: ${fallbackErr.message}")
-                                    sendErrorEvent(channel, "CPU fallback failed: ${fallbackErr.message}")
-                                    invoke.reject("CPU fallback failed: ${fallbackErr.message}", fallbackErr)
+                                // Flush remaining
+                                if (retryBuffer.isNotEmpty()) {
+                                    sendTokenBatch(channel, retryBuffer.toString(), retryBatchIndex)
+                                    retryBatchIndex++
+                                    retryBuffer.clear()
                                 }
-                            } else {
-                                sendErrorEvent(channel, "Streaming inference error: ${throwable.message}")
-                                invoke.reject("Streaming inference error: ${throwable.message}", throwable as? Exception)
+
+                                val finalText = retryFullText.toString()
+                                val tokenCount = finalText.length / CHARS_PER_TOKEN
+                                retrySession.recordSend()
+
+                                try {
+                                    val completeData = JSObject()
+                                    completeData.put("full_text", finalText)
+                                    completeData.put("token_count", tokenCount)
+                                    val completeEvent = JSObject()
+                                    completeEvent.put("event", "complete")
+                                    completeEvent.put("data", completeData)
+                                    channel.send(completeEvent)
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "send_message: failed to send CPU retry complete event: ${e.message}")
+                                }
+
+                                Log.i(TAG, "send_message: CPU retry complete — ${finalText.length} chars, $retryBatchIndex batches")
+                                invoke.resolve()
+                            } catch (fallbackErr: Exception) {
+                                Log.e(TAG, "send_message: CPU fallback failed: ${fallbackErr.message}")
+                                sendErrorEvent(channel, "CPU fallback failed: ${fallbackErr.message}")
+                                invoke.reject("CPU fallback failed: ${fallbackErr.message}")
                             }
+                        } else {
+                            sendErrorEvent(channel, "Streaming inference error: ${throwable.message}")
+                            invoke.reject("Streaming inference error: ${throwable.message}")
                         }
-                    },
-                    null as? java.util.Map<String, Any>
-                )
+                    }
+                    .collect { msg ->
+                        val newText = msg.toString()
+                        if (newText.isEmpty()) return@collect
+
+                        fullText.append(newText)
+                        batchBuffer.append(newText)
+
+                        // Send batch when buffer exceeds threshold
+                        if (batchBuffer.length >= batchThreshold) {
+                            sendTokenBatch(channel, batchBuffer.toString(), batchIndex)
+                            Log.d(TAG, "send_message: batch $batchIndex sent (${batchBuffer.length} chars)")
+                            batchIndex++
+                            batchBuffer.clear()
+                        }
+                    }
+
+                // Flow completed successfully — flush remaining text
+                if (batchBuffer.isNotEmpty()) {
+                    sendTokenBatch(channel, batchBuffer.toString(), batchIndex)
+                    Log.d(TAG, "send_message: final batch $batchIndex sent (${batchBuffer.length} chars)")
+                    batchIndex++
+                    batchBuffer.clear()
+                }
+
+                val finalText = fullText.toString()
+                val tokenCount = finalText.length / CHARS_PER_TOKEN
+                activeSession.recordSend()
+
+                // Send complete event
+                try {
+                    val completeData = JSObject()
+                    completeData.put("full_text", finalText)
+                    completeData.put("token_count", tokenCount)
+                    val completeEvent = JSObject()
+                    completeEvent.put("event", "complete")
+                    completeEvent.put("data", completeData)
+                    channel.send(completeEvent)
+                } catch (e: Exception) {
+                    Log.w(TAG, "send_message: failed to send complete event: ${e.message}")
+                }
+
+                Log.i(TAG, "send_message: complete — ${finalText.length} chars, $batchIndex batches, ~$tokenCount tokens")
+                invoke.resolve()
             } catch (e: Exception) {
                 Log.e(TAG, "send_message: failed to start streaming — ${e.message}")
                 sendErrorEvent(channel, "Failed to start streaming: ${e.message}")
-                invoke.reject("Failed to start streaming: ${e.message}", e)
+                invoke.reject("Failed to start streaming: ${e.message}")
             }
         }
     }
@@ -419,7 +419,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun list_models(invoke: Invoke) {
-        Log.i(TAG, "list_models")
+        Log.e(TAG, "COMMAND: list_models called")
 
         try {
             val array = app.tauri.plugin.JSArray()
@@ -558,6 +558,607 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
                     channel.send(event)
                 } catch (_: Exception) {}
                 invoke.reject("Download failed: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Download a model from an arbitrary URL to a user-chosen directory,
+     * streaming progress events via a Channel.
+     *
+     * Args (via DownloadModelFromUrlArgs): url (String), saveDir (String), onProgress (Channel)
+     *
+     * Channel events follow the same contract as download_model.
+     */
+    @Command
+    fun download_model_from_url(invoke: Invoke) {
+        val args: DownloadModelFromUrlArgs
+        try {
+            args = invoke.parseArgs(DownloadModelFromUrlArgs::class.java)
+        } catch (e: Exception) {
+            return invoke.reject("Invalid arguments: ${e.message}", e)
+        }
+
+        val url = args.url
+        val saveDir = args.saveDir
+        val channel = args.onProgress
+
+        Log.i(TAG, "download_model_from_url: url=$url, saveDir=$saveDir")
+
+        // If saveDir is empty, use the default app models directory
+        val actualSaveDir = if (saveDir.isNullOrEmpty()) {
+            ModelManager.getModelDir(activity)
+        } else {
+            File(saveDir)
+        }
+
+        // Launch download on IO coroutine
+        streamingScope.launch(streamingScope.coroutineContext + Dispatchers.IO) {
+            try {
+                ModelManager.downloadFromUrl(url, actualSaveDir, object : ModelManager.DownloadCallback {
+                    override fun onProgress(bytesDownloaded: Long, totalBytes: Long, bytesPerSecond: Long) {
+                        try {
+                            val data = JSObject()
+                            data.put("bytesDownloaded", bytesDownloaded)
+                            data.put("totalBytes", totalBytes)
+                            data.put("bytesPerSecond", bytesPerSecond)
+                            val event = JSObject()
+                            event.put("event", "progress")
+                            event.put("data", data)
+                            channel.send(event)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "download_model_from_url: progress channel send failed: ${e.message}")
+                        }
+                    }
+
+                    override fun onComplete(modelPath: String) {
+                        Log.i(TAG, "download_model_from_url: complete — $modelPath")
+                        try {
+                            val fileName = File(modelPath).name
+                            val data = JSObject()
+                            data.put("modelPath", modelPath)
+                            data.put("fileName", fileName)
+                            val event = JSObject()
+                            event.put("event", "complete")
+                            event.put("data", data)
+                            channel.send(event)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "download_model_from_url: complete channel send failed: ${e.message}")
+                        }
+                        invoke.resolve()
+                    }
+
+                    override fun onError(error: String) {
+                        Log.e(TAG, "download_model_from_url: error — $error")
+                        try {
+                            val data = JSObject()
+                            data.put("message", error)
+                            val event = JSObject()
+                            event.put("event", "error")
+                            event.put("data", data)
+                            channel.send(event)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "download_model_from_url: error channel send failed: ${e.message}")
+                        }
+                        invoke.reject("Download failed: $error")
+                    }
+                })
+            } catch (e: Exception) {
+                Log.e(TAG, "download_model_from_url: unexpected error — ${e.message}", e)
+                try {
+                    val data = JSObject()
+                    data.put("message", e.message ?: "Unknown error")
+                    val event = JSObject()
+                    event.put("event", "error")
+                    event.put("data", data)
+                    channel.send(event)
+                } catch (_: Exception) {}
+                invoke.reject("Download failed: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Open SAF picker to choose where to save a model file.
+     * Uses ACTION_CREATE_DOCUMENT so the user picks a directory and filename.
+     *
+     * Returns: { uri: String, displayName: String }
+     */
+    @Command
+    fun pickSaveLocation(invoke: Invoke) {
+        Log.i(TAG, "pickSaveLocation called")
+        val args = invoke.getArgs()
+        val fileName = args.optString("fileName", "model.litertlm")
+        Log.i(TAG, "pickSaveLocation: fileName=$fileName")
+
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+        }
+
+        try {
+            startActivityForResult(invoke, intent, "saveSafLocationCallback")
+        } catch (e: Exception) {
+            Log.e(TAG, "pickSaveLocation: failed to launch — ${e.message}", e)
+            invoke.reject("Failed to open save picker: ${e.message}")
+        }
+    }
+
+    @ActivityCallback
+    private fun saveSafLocationCallback(invoke: Invoke, result: androidx.activity.result.ActivityResult) {
+        Log.d(TAG, "saveSafLocationCallback: resultCode=${result.resultCode}")
+        if (result.resultCode == Activity.RESULT_OK && result.data?.data != null) {
+            val uri = result.data!!.data!!
+            Log.i(TAG, "SAF save: user selected uri=$uri")
+            val ret = JSObject()
+            ret.put("uri", uri.toString())
+            ret.put("displayName", uri.lastPathSegment ?: "unknown")
+            invoke.resolve(ret)
+        } else {
+            Log.w(TAG, "SAF save: user cancelled")
+            invoke.reject("User cancelled")
+        }
+    }
+
+    /**
+     * Open SAF picker to select an existing .litertlm model file.
+     * Copies the selected file to app cache and returns the local path.
+     *
+     * Returns: { path: String }
+     */
+    @Command
+    fun pickModelFile(invoke: Invoke) {
+        Log.i(TAG, "pickModelFile called")
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        try {
+            startActivityForResult(invoke, intent, "openModelFileCallback")
+        } catch (e: Exception) {
+            Log.e(TAG, "pickModelFile: failed to launch — ${e.message}", e)
+            invoke.reject("Failed to open file picker: ${e.message}")
+        }
+    }
+
+    @ActivityCallback
+    private fun openModelFileCallback(invoke: Invoke, result: androidx.activity.result.ActivityResult) {
+        Log.d(TAG, "openModelFileCallback: resultCode=${result.resultCode}")
+        if (result.resultCode == Activity.RESULT_OK && result.data?.data != null) {
+            val uri = result.data!!.data!!
+            Log.i(TAG, "SAF open: user selected uri=$uri")
+            val inv = invoke
+            streamingScope.launch(Dispatchers.IO) {
+                try {
+                    val cachedPath = copySafToCache(uri)
+                    val ret = JSObject()
+                    ret.put("path", cachedPath)
+                    inv.resolve(ret)
+                } catch (e: Exception) {
+                    Log.e(TAG, "SAF open: failed to copy file — ${e.message}", e)
+                    inv.reject("Failed to read file: ${e.message}")
+                }
+            }
+        } else {
+            Log.w(TAG, "SAF open: user cancelled")
+            invoke.reject("User cancelled")
+        }
+    }
+
+    /**
+     * Download a model from URL to a SAF URI (obtained from pickSaveLocation).
+     * Streams progress via Channel. On completion, the model is at the SAF URI
+     * and also cached locally for inference.
+     *
+     * Args: url (String), safUri (String), onProgress (Channel)
+     */
+    @Command
+    fun downloadToSaf(invoke: Invoke) {
+        Log.i(TAG, "downloadToSaf called")
+        val args = invoke.getArgs()
+        val url = args.getString("url") ?: return invoke.reject("url is required")
+        val safUri = args.getString("safUri") ?: return invoke.reject("safUri is required")
+        val channel: Channel? = args.get("onProgress") as? Channel
+        Log.i(TAG, "download_to_saf: url=$url, safUri=$safUri")
+
+        streamingScope.launch(Dispatchers.IO) {
+            try {
+                val uri = Uri.parse(safUri)
+                val outputStream = activity.contentResolver.openOutputStream(uri, "rw")
+                    ?: throw Exception("Failed to open output stream for URI: $safUri")
+
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val request = okhttp3.Request.Builder().url(url).build()
+                val response = client.newCall(request).execute()
+
+                if (!response.isSuccessful) {
+                    throw Exception("HTTP ${response.code}")
+                }
+
+                val body = response.body ?: throw Exception("Empty response body")
+                val totalBytes = body.contentLength()
+                var downloadedBytes = 0L
+                var lastReportTime = System.currentTimeMillis()
+                var lastReportedBytes = 0L
+                val buffer = ByteArray(8192)
+
+                body.byteStream().use { input ->
+                    outputStream.use { output ->
+                        while (true) {
+                            val bytesRead = input.read(buffer)
+                            if (bytesRead == -1) break
+                            output.write(buffer, 0, bytesRead)
+                            downloadedBytes += bytesRead
+
+                            val now = System.currentTimeMillis()
+                            if (now - lastReportTime >= 250 && channel != null) {
+                                val elapsed = (now - lastReportTime) / 1000.0
+                                val speed = ((downloadedBytes - lastReportedBytes) / elapsed).toLong()
+                                channel.let { ch ->
+                                    try {
+                                        val data = JSObject()
+                                        data.put("bytesDownloaded", downloadedBytes)
+                                        data.put("totalBytes", totalBytes)
+                                        data.put("bytesPerSecond", speed)
+                                        val event = JSObject()
+                                        event.put("event", "progress")
+                                        event.put("data", data)
+                                        ch.send(event)
+                                    } catch (_: Exception) {}
+                                }
+                                lastReportTime = now
+                                lastReportedBytes = downloadedBytes
+                            }
+                        }
+                    }
+                }
+
+                // Copy from SAF URI to local cache for inference
+                val cachedPath = copySafToCache(uri)
+                Log.i(TAG, "download_to_saf: complete — cached at $cachedPath ($downloadedBytes bytes)")
+
+                if (channel != null) {
+                    channel.let { ch ->
+                        try {
+                            val data = JSObject()
+                            data.put("modelPath", cachedPath)
+                            data.put("fileName", uri.lastPathSegment ?: "model.litertlm")
+                            val event = JSObject()
+                            event.put("event", "complete")
+                            event.put("data", data)
+                            ch.send(event)
+                        } catch (_: Exception) {}
+                    }
+                }
+                invoke.resolve()
+            } catch (e: Exception) {
+                Log.e(TAG, "download_to_saf: failed — ${e.message}", e)
+                if (channel != null) {
+                    channel.let { ch ->
+                        try {
+                            val data = JSObject()
+                            data.put("message", e.message ?: "Unknown error")
+                            val event = JSObject()
+                            event.put("event", "error")
+                            event.put("data", data)
+                            ch.send(event)
+                        } catch (_: Exception) {}
+                    }
+                }
+                invoke.reject("Download failed: ${e.message}", e)
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // SAF helpers (legacy launchers replaced by @ActivityCallback)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Copy a file from a SAF URI to the app's cache directory.
+     * Returns the absolute path of the cached file.
+     */
+    private fun copySafToCache(uri: Uri): String {
+        val fileName = uri.lastPathSegment?.substringAfterLast("/")
+            ?: "model-${System.currentTimeMillis()}.litertlm"
+        val cacheFile = File(activity.cacheDir, fileName)
+
+        activity.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(cacheFile).use { output ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                }
+            }
+        } ?: throw Exception("Failed to open input stream for URI: $uri")
+
+        Log.i(TAG, "copySafToCache: copied ${cacheFile.length()} bytes to ${cacheFile.absolutePath}")
+        return cacheFile.absolutePath
+    }
+
+    // -----------------------------------------------------------------------
+    // SAF shared-folder commands
+    // -----------------------------------------------------------------------
+
+    /**
+     * Open SAF picker to choose a shared folder for models.
+     * The URI is persisted in SharedPreferences for future sessions.
+     *
+     * Returns: { uri: String }
+     */
+    @Command
+    fun pickSafFolder(invoke: Invoke) {
+        Log.i(TAG, "pickSafFolder called")
+        Log.i(TAG, "pick_saf_folder: opening folder picker")
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+        }
+        try {
+            startActivityForResult(invoke, intent, "safFolderPickerCallback")
+        } catch (e: Exception) {
+            Log.e(TAG, "pick_saf_folder: failed to launch — ${e.message}", e)
+            invoke.reject("Failed to open folder picker: ${e.message}")
+        }
+    }
+
+    @ActivityCallback
+    private fun safFolderPickerCallback(invoke: Invoke, result: androidx.activity.result.ActivityResult) {
+        Log.d(TAG, "safFolderPickerCallback: resultCode=${result.resultCode}")
+        if (result.resultCode == Activity.RESULT_OK && result.data?.data != null) {
+            val uri = result.data!!.data!!
+            Log.i(TAG, "SAF folder: user selected uri=$uri")
+            // Persist permission across reboots
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            activity.contentResolver.takePersistableUriPermission(uri, flags)
+            safPrefs.edit().putString(KEY_SAF_FOLDER_URI, uri.toString()).apply()
+            Log.i(TAG, "SAF folder saved: $uri")
+            val ret = JSObject()
+            ret.put("uri", uri.toString())
+            invoke.resolve(ret)
+        } else {
+            Log.w(TAG, "SAF folder: user cancelled")
+            invoke.reject("User cancelled")
+        }
+    }
+
+    /**
+     * Check SAF folder status: whether we have a persisted URI and it's still valid.
+     *
+     * Returns: { hasPermission: Boolean, folderUri: String?, folderName: String? }
+     */
+    @Command
+    fun getSafFolderStatus(invoke: Invoke) {
+        Log.i(TAG, "getSafFolderStatus called")
+        Log.d(TAG, "get_saf_folder_status")
+        try {
+            val uriStr = persistedSafFolderUri
+            if (uriStr == null) {
+                val ret = JSObject()
+                ret.put("hasPermission", false)
+                ret.put("folderUri", null)
+                ret.put("folderName", null)
+                return invoke.resolve(ret)
+            }
+
+            val uri = Uri.parse(uriStr)
+            val uriStrCanon = uri.toString()
+            // Check if the persisted permission is still valid
+            val perms = activity.contentResolver.persistedUriPermissions
+            val stillValid = perms.any { it.uri.toString() == uriStrCanon && it.isReadPermission }
+
+            if (!stillValid) {
+                // Permission revoked — clear persisted URI
+                safPrefs.edit().remove(KEY_SAF_FOLDER_URI).apply()
+                val ret = JSObject()
+                ret.put("hasPermission", false)
+                ret.put("folderUri", null)
+                ret.put("folderName", null)
+                return invoke.resolve(ret)
+            }
+
+            val folderName = uri.lastPathSegment ?: "Shared models"
+            val ret = JSObject()
+            ret.put("hasPermission", true)
+            ret.put("folderUri", uriStr)
+            ret.put("folderName", folderName)
+            invoke.resolve(ret)
+        } catch (e: Exception) {
+            Log.e(TAG, "get_saf_folder_status: failed — ${e.message}", e)
+            invoke.reject("Failed: ${e.message}")
+        }
+    }
+
+    /**
+     * List .litertlm model files in the persisted SAF folder.
+     *
+     * Returns: { models: [{ fileName, sizeBytes, safUri }] }
+     */
+    @Command
+    fun listSafModels(invoke: Invoke) {
+        Log.i(TAG, "listSafModels called")
+        try {
+            val uriStr = persistedSafFolderUri
+            if (uriStr == null) {
+                return invoke.reject("No SAF folder selected. Call pick_saf_folder first.")
+            }
+
+            val treeUri = Uri.parse(uriStr)
+            val childrenUri = androidx.documentfile.provider.DocumentFile.fromTreeUri(activity, treeUri)
+            Log.i(TAG, "listSafModels: treeUri=$treeUri exists=${childrenUri?.exists()}")
+            if (childrenUri == null || !childrenUri.exists()) {
+                return invoke.reject("SAF folder no longer accessible")
+            }
+
+            val array = app.tauri.plugin.JSArray()
+
+            val docs = childrenUri.listFiles()
+            Log.i(TAG, "listSafModels: scanning ${docs.size} files")
+            for (doc in docs) {
+                val name = doc.name ?: continue
+                if (!name.endsWith(".litertlm", ignoreCase = true)) {
+                    Log.v(TAG, "Skipping non-model file: $name")
+                    continue
+                }
+
+                val size = doc.length()
+                val docUri = doc.uri.toString()
+
+                val obj = JSObject()
+                obj.put("fileName", name)
+                obj.put("sizeBytes", size)
+                obj.put("safUri", docUri)
+                array.put(obj)
+
+                Log.i(TAG, "Found SAF model: $name ($size bytes)")
+            }
+
+            val result = JSObject()
+            result.put("models", array)
+            invoke.resolve(result)
+        } catch (e: Exception) {
+            Log.e(TAG, "list_saf_models: failed — ${e.message}", e)
+            invoke.reject("Failed: ${e.message}")
+        }
+    }
+
+    /**
+     * No longer needed as we read direct from SAF. 
+     * Kept for API surface compatibility but returns input URI.
+     */
+    @Command
+    fun cacheSafModel(invoke: Invoke) {
+        Log.i(TAG, "cacheSafModel called")
+        val args = invoke.getArgs()
+        val safUriStr = args.getString("saf_uri") ?: return invoke.reject("saf_uri is required")
+        Log.i(TAG, "cache_saf_model: no-op (direct SAF read enabled) — uri=$safUriStr")
+        val ret = JSObject()
+        ret.put("path", safUriStr)
+        ret.put("wasCached", true)
+        invoke.resolve(ret)
+    }
+
+    /**
+     * Download a model from URL directly into the SAF shared folder.
+     * Streams progress via Channel.
+     *
+     * Args: url (String), fileName (String), onProgress (Channel)
+     * Returns via channel: { event: "progress"|"complete"|"error", data: {...} }
+     */
+    @Command
+    fun downloadToSafFolder(invoke: Invoke) {
+        Log.i(TAG, "downloadToSafFolder called")
+        val args = invoke.getArgs()
+        val url = args.getString("url") ?: return invoke.reject("url is required")
+        val fileName = args.getString("fileName") ?: return invoke.reject("fileName is required")
+        val channel: Channel? = args.get("onProgress") as? Channel
+        Log.i(TAG, "download_to_saf_folder: url=$url, fileName=$fileName")
+
+        val uriStr = persistedSafFolderUri
+        if (uriStr == null) {
+            return invoke.reject("No SAF folder selected. Call pick_saf_folder first.")
+        }
+
+        streamingScope.launch(Dispatchers.IO) {
+            try {
+                val treeUri = Uri.parse(uriStr)
+                val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(activity, treeUri)
+                    ?: throw Exception("SAF folder not accessible")
+
+                // Create the file in the SAF folder
+                val safFile = treeDoc.createFile("application/octet-stream", fileName)
+                    ?: throw Exception("Failed to create file in SAF folder")
+
+                val safFileUri = safFile.uri
+                val outputStream = activity.contentResolver.openOutputStream(safFileUri, "rw")
+                    ?: throw Exception("Failed to open output stream")
+
+                // Download from URL to SAF
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val request = okhttp3.Request.Builder().url(url).build()
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) throw Exception("HTTP ${response.code}")
+
+                val body = response.body ?: throw Exception("Empty response body")
+                val totalBytes = body.contentLength()
+                var downloadedBytes = 0L
+                var lastReportTime = System.currentTimeMillis()
+                var lastReportedBytes = 0L
+                val buffer = ByteArray(8192)
+
+                body.byteStream().use { input ->
+                    outputStream.use { output ->
+                        while (true) {
+                            val bytesRead = input.read(buffer)
+                            if (bytesRead == -1) break
+                            output.write(buffer, 0, bytesRead)
+                            downloadedBytes += bytesRead
+
+                            val now = System.currentTimeMillis()
+                            if (now - lastReportTime >= 250 && channel != null) {
+                                val elapsed = (now - lastReportTime) / 1000.0
+                                val speed = ((downloadedBytes - lastReportedBytes) / elapsed).toLong()
+                                try {
+                                    val data = JSObject()
+                                    data.put("bytesDownloaded", downloadedBytes)
+                                    data.put("totalBytes", totalBytes)
+                                    data.put("bytesPerSecond", speed)
+                                    val event = JSObject()
+                                    event.put("event", "progress")
+                                    event.put("data", data)
+                                    channel.send(event)
+                                } catch (_: Exception) {}
+                                lastReportTime = now
+                                lastReportedBytes = downloadedBytes
+                            }
+                        }
+                    }
+                }
+
+                Log.i(TAG, "download_to_saf_folder: complete — safUri=$safFileUri")
+
+                if (channel != null) {
+                    try {
+                        val data = JSObject()
+                        data.put("modelPath", safFileUri.toString())
+                        data.put("fileName", fileName)
+                        data.put("safUri", safFileUri.toString())
+                        val event = JSObject()
+                        event.put("event", "complete")
+                        event.put("data", data)
+                        channel.send(event)
+                    } catch (_: Exception) {}
+                }
+                withContext(Dispatchers.Main) { invoke.resolve() }
+            } catch (e: Exception) {
+                Log.e(TAG, "download_to_saf_folder: failed — ${e.message}", e)
+                if (channel != null) {
+                    try {
+                        val data = JSObject()
+                        data.put("message", e.message ?: "Unknown error")
+                        val event = JSObject()
+                        event.put("event", "error")
+                        event.put("data", data)
+                        channel.send(event)
+                    } catch (_: Exception) {}
+                }
+                withContext(Dispatchers.Main) { invoke.reject("Download failed: ${e.message}", e) }
             }
         }
     }
@@ -2933,25 +3534,75 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
         else if (backend is Backend.GPU) "GPU"
         else backend.javaClass.simpleName
 
+
+
     /**
-     * Acquire engine for the given model path, handling GPU fallback.
+     * Acquire engine for the given model path, handling GPU fallback and SAF URIs.
      */
     private fun acquireEngine(modelPath: String): com.google.ai.edge.litertlm.Engine {
         val cacheDir = activity.cacheDir.absolutePath
         val backend = selectBackend(preferGpu = !gpuFailed)
 
+        var actualModelPath = modelPath
+        var pfd: android.os.ParcelFileDescriptor? = null
+
+        if (modelPath.startsWith("content://")) {
+            val uri = Uri.parse(modelPath)
+            val rawPath = getPathFromSafUri(activity, uri)
+            if (rawPath != null && File(rawPath).canRead()) {
+                actualModelPath = rawPath
+                Log.i(TAG, "acquireEngine: resolved raw path $actualModelPath")
+            } else {
+                pfd = activity.contentResolver.openFileDescriptor(uri, "r")
+                if (pfd != null) {
+                    actualModelPath = "/proc/self/fd/${pfd.fd}"
+                    Log.i(TAG, "acquireEngine: mapped to fd ${pfd.fd} -> $actualModelPath")
+                } else {
+                    throw Exception("Could not open file descriptor for SAF URI")
+                }
+            }
+        }
+
         return try {
-            EngineHolder.getOrCreate(modelPath, cacheDir, backend)
+            EngineHolder.getOrCreate(actualModelPath, pfd, cacheDir, backend)
         } catch (e: Exception) {
             if (!gpuFailed && isGpuBackendFailure(e)) {
                 Log.w(TAG, "acquireEngine: GPU failed, retrying on CPU: ${e.message}")
                 gpuFailed = true
                 EngineHolder.close()
-                EngineHolder.getOrCreate(modelPath, cacheDir, Backend.CPU())
+                var retryPfd: android.os.ParcelFileDescriptor? = null
+                var retryPath = modelPath
+                if (modelPath.startsWith("content://") && (actualModelPath.startsWith("/proc/self/fd/"))) {
+                    val uri = Uri.parse(modelPath)
+                    retryPfd = activity.contentResolver.openFileDescriptor(uri, "r")
+                    retryPath = "/proc/self/fd/${retryPfd!!.fd}"
+                }
+                EngineHolder.getOrCreate(retryPath, retryPfd, cacheDir, com.google.ai.edge.litertlm.Backend.CPU())
             } else {
                 throw e
             }
         }
+    }
+
+    private fun getPathFromSafUri(context: android.content.Context, uri: Uri): String? {
+        try {
+            if ("com.android.externalstorage.documents" == uri.authority) {
+                val docId = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)?.uri?.let {
+                    android.provider.DocumentsContract.getDocumentId(it)
+                } ?: android.provider.DocumentsContract.getDocumentId(uri)
+
+                val split = docId.split(":")
+                val type = split[0]
+                val path = if (split.size > 1) split[1] else ""
+
+                if ("primary".equals(type, ignoreCase = true)) {
+                    return android.os.Environment.getExternalStorageDirectory().toString() + "/" + path
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "getPathFromSafUri: couldn't resolve raw path — ${e.message}")
+        }
+        return null
     }
 
     /**
@@ -3026,7 +3677,7 @@ class PokeclawPlugin(private val activity: Activity) : Plugin(activity) {
 
         // Reset and recreate on CPU
         EngineHolder.close()
-        val cpuEngine = EngineHolder.getOrCreate(modelPath, activity.cacheDir.absolutePath, Backend.CPU())
+        val cpuEngine = EngineHolder.getOrCreate(modelPath, null, activity.cacheDir.absolutePath, Backend.CPU())
         val conversation = createConversationWithRetry(cpuEngine, modelPath)
 
         session = InferenceSession(

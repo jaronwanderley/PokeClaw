@@ -54,7 +54,7 @@ export function useChat() {
    */
   async function updateSessionStatus(): Promise<void> {
     try {
-      const result = await invoke<Record<string, unknown>>('get_session_status')
+      const result = await invoke<Record<string, unknown>>('plugin:pokeclaw|getSessionStatus')
       const state = (result.state as string ?? 'idle').toLowerCase() as 'idle' | 'loading' | 'ready' | 'error'
       sessionStatus.value = state
       console.log('[useChat] updateSessionStatus:', state)
@@ -106,7 +106,7 @@ export function useChat() {
     }
 
     try {
-      await invoke('send_message', { message: text, onEvent })
+      await invoke('plugin:pokeclaw|sendMessage', { message: text, onEvent })
     } catch (err) {
       messages.value.push({
         id: nextId++,

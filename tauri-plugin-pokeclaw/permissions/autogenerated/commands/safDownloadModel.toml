@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-safDownloadModel"
+description = "Enables the safDownloadModel command without any pre-configured scope."
+commands.allow = ["safDownloadModel"]
+
+[[permission]]
+identifier = "deny-safDownloadModel"
+description = "Denies the safDownloadModel command without any pre-configured scope."
+commands.deny = ["safDownloadModel"]

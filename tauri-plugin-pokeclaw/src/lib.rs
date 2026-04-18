@@ -1,4 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+#[cfg(not(target_os = "android"))]
+use std::sync::Arc;
 use tauri::{
     plugin::{Builder, TauriPlugin},
     Manager, Runtime, State,
@@ -701,11 +703,12 @@ pub use session_impl::do_send_message;
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "android")]
+#[allow(non_snake_case)]
 mod android_commands {
     use super::*;
 
     #[tauri::command]
-    pub fn start_session(
+    pub fn startSession(
         state: State<'_, InferenceState>,
         model_path: String,
         prefer_gpu: bool,
@@ -714,12 +717,12 @@ mod android_commands {
     }
 
     #[tauri::command]
-    pub fn stop_session(state: State<'_, InferenceState>) -> Result<(), String> {
+    pub fn stopSession(state: State<'_, InferenceState>) -> Result<(), String> {
         session_impl::do_stop_session(&state)
     }
 
     #[tauri::command]
-    pub fn send_message(
+    pub fn sendMessage(
         state: State<'_, InferenceState>,
         message: String,
     ) -> Result<String, String> {
@@ -727,7 +730,7 @@ mod android_commands {
     }
 
     #[tauri::command]
-    pub fn get_session_status(state: State<'_, InferenceState>) -> Result<SessionStatus, String> {
+    pub fn getSessionStatus(state: State<'_, InferenceState>) -> Result<SessionStatus, String> {
         session_impl::do_get_session_status(&state)
     }
 
@@ -743,11 +746,12 @@ mod android_commands {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "ios")]
+#[allow(non_snake_case)]
 mod ios_commands {
     use super::*;
 
     #[tauri::command]
-    pub fn start_session(
+    pub fn startSession(
         state: State<'_, InferenceState>,
         model_path: String,
         prefer_gpu: bool,
@@ -761,7 +765,7 @@ mod ios_commands {
     }
 
     #[tauri::command]
-    pub fn send_message(
+    pub fn sendMessage(
         state: State<'_, InferenceState>,
         message: String,
     ) -> Result<String, String> {
@@ -785,11 +789,12 @@ mod ios_commands {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[allow(non_snake_case)]
 mod desktop_commands {
     use super::*;
 
     #[tauri::command]
-    pub fn start_session(
+    pub fn startSession(
         state: State<'_, InferenceState>,
         model_path: String,
         prefer_gpu: bool,
@@ -805,7 +810,7 @@ mod desktop_commands {
     /// Desktop streaming send_message. Uses Tauri Channel to stream
     /// StreamEvent tokens to the frontend — same contract as Kotlin Android.
     #[tauri::command]
-    pub async fn send_message(
+    pub async fn sendMessage(
         state: State<'_, InferenceState>,
         message: String,
         on_event: tauri::ipc::Channel<StreamEvent>,
@@ -846,6 +851,17 @@ mod desktop_commands {
         on_progress: tauri::ipc::Channel<DownloadEvent>,
     ) -> Result<(), String> {
         desktop::model_manager::download_model(&model_id, &on_progress).await
+    }
+
+    /// Desktop download_model_from_url. Downloads a model from an arbitrary URL
+    /// to a user-chosen directory with real progress tracking.
+    #[tauri::command]
+    pub async fn download_model_from_url(
+        url: String,
+        save_dir: String,
+        on_progress: tauri::ipc::Channel<DownloadEvent>,
+    ) -> Result<(), String> {
+        desktop::model_manager::download_model_from_url(&url, &save_dir, &on_progress).await
     }
 
     // -----------------------------------------------------------------
@@ -1057,6 +1073,63 @@ mod desktop_commands {
     }
 
     // -----------------------------------------------------------------
+    // SAF command desktop stubs (Android-only, desktop uses file dialog)
+    // -----------------------------------------------------------------
+
+    /// Desktop stub for pick_save_location. Uses Tauri dialog save instead.
+    #[tauri::command]
+    pub async fn pick_save_location(file_name: String) -> Result<String, String> {
+        log::info!("pick_save_location (desktop): fileName='{}'", file_name);
+        // On desktop, we don't need SAF — return empty to signal frontend to use file dialog
+        Err("Not available on desktop. Use the file dialog instead.".into())
+    }
+
+    /// Desktop stub for pick_model_file. Uses Tauri dialog open instead.
+    #[tauri::command]
+    pub fn pickModelFile() -> Result<String, String> {
+        log::info!("pick_model_file (desktop): Not available");
+        Err("Not available on desktop. Use the file dialog instead.".into())
+    }
+
+    /// Desktop stub for download_to_saf. Not needed on desktop.
+    #[tauri::command]
+    pub fn downloadToSaf(_url: String, _saf_uri: String) -> Result<String, String> {
+        Err("Not available on desktop. Use download_model_from_url instead.".into())
+    }
+
+    /// Desktop stub for saf_download_model. Not needed on desktop.
+    #[tauri::command]
+    pub fn safDownloadModel(_url: String, _file_name: String) -> Result<String, String> {
+        Err("Not available on desktop. Use download_model_from_url instead.".into())
+    }
+
+    // SAF shared-folder desktop stubs (Android-only)
+    #[tauri::command]
+    pub fn pickSafFolder() -> Result<String, String> {
+        Err("Not available on desktop. Use file dialog instead.".into())
+    }
+
+    #[tauri::command]
+    pub fn getSafFolderStatus() -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({ "hasPermission": false, "folderUri": null, "folderName": null }))
+    }
+
+    #[tauri::command]
+    pub fn listSafModels() -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({ "models": [] }))
+    }
+
+    #[tauri::command]
+    pub fn cacheSafModel(_saf_uri: String) -> Result<String, String> {
+        Err("Not available on desktop.".into())
+    }
+
+    #[tauri::command]
+    pub async fn downloadToSafFolder(_url: String, _file_name: String) -> Result<String, String> {
+        Err("Not available on desktop. Use download_model_from_url instead.".into())
+    }
+
+    // -----------------------------------------------------------------
     // Live Activity desktop mocks
     // -----------------------------------------------------------------
 
@@ -1138,33 +1211,43 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
     #[cfg(target_os = "android")]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            android_commands::start_session,
-            android_commands::stop_session,
-            android_commands::send_message,
-            android_commands::get_session_status,
+            android_commands::startSession,
+            android_commands::stopSession,
+            android_commands::sendMessage,
+            android_commands::getSessionStatus,
             android_commands::chat,
         ]);
 
     #[cfg(target_os = "ios")]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            ios_commands::start_session,
-            ios_commands::stop_session,
-            ios_commands::send_message,
-            ios_commands::get_session_status,
+            ios_commands::startSession,
+            ios_commands::stopSession,
+            ios_commands::sendMessage,
+            ios_commands::getSessionStatus,
             ios_commands::chat,
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-            desktop_commands::start_session,
-            desktop_commands::stop_session,
-            desktop_commands::send_message,
-            desktop_commands::get_session_status,
+            desktop_commands::startSession,
+            desktop_commands::stopSession,
+            desktop_commands::sendMessage,
+            desktop_commands::getSessionStatus,
             desktop_commands::ping,
             desktop_commands::chat,
             desktop_commands::list_models,
             desktop_commands::download_model,
+            desktop_commands::download_model_from_url,
+            desktop_commands::pick_save_location,
+            desktop_commands::pick_model_file,
+            desktop_commands::download_to_saf,
+            desktop_commands::saf_download_model,
+            desktop_commands::pick_saf_folder,
+            desktop_commands::get_saf_folder_status,
+            desktop_commands::list_saf_models,
+            desktop_commands::cache_saf_model,
+            desktop_commands::download_to_saf_folder,
             desktop_commands::get_screen_info,
             desktop_commands::find_node_info,
             desktop_commands::get_device_info,

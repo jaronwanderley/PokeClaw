@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-systemKey"
+description = "Enables the systemKey command without any pre-configured scope."
+commands.allow = ["systemKey"]
+
+[[permission]]
+identifier = "deny-systemKey"
+description = "Denies the systemKey command without any pre-configured scope."
+commands.deny = ["systemKey"]

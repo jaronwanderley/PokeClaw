@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-findNodeInfo"
+description = "Enables the findNodeInfo command without any pre-configured scope."
+commands.allow = ["findNodeInfo"]
+
+[[permission]]
+identifier = "deny-findNodeInfo"
+description = "Denies the findNodeInfo command without any pre-configured scope."
+commands.deny = ["findNodeInfo"]

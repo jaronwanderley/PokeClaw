@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-pick-save-location"
+description = "Enables the pick_save_location command without any pre-configured scope."
+commands.allow = ["pick_save_location"]
+
+[[permission]]
+identifier = "deny-pick-save-location"
+description = "Denies the pick_save_location command without any pre-configured scope."
+commands.deny = ["pick_save_location"]

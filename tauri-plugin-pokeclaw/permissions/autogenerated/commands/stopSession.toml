@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-stopSession"
+description = "Enables the stopSession command without any pre-configured scope."
+commands.allow = ["stopSession"]
+
+[[permission]]
+identifier = "deny-stopSession"
+description = "Denies the stopSession command without any pre-configured scope."
+commands.deny = ["stopSession"]

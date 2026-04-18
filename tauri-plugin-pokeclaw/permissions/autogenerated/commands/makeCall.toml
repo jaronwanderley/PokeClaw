@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-makeCall"
+description = "Enables the makeCall command without any pre-configured scope."
+commands.allow = ["makeCall"]
+
+[[permission]]
+identifier = "deny-makeCall"
+description = "Denies the makeCall command without any pre-configured scope."
+commands.deny = ["makeCall"]

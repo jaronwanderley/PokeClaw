@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-startSession"
+description = "Enables the startSession command without any pre-configured scope."
+commands.allow = ["startSession"]
+
+[[permission]]
+identifier = "deny-startSession"
+description = "Denies the startSession command without any pre-configured scope."
+commands.deny = ["startSession"]

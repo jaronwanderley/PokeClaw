@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-sendMessage"
+description = "Enables the sendMessage command without any pre-configured scope."
+commands.allow = ["sendMessage"]
+
+[[permission]]
+identifier = "deny-sendMessage"
+description = "Denies the sendMessage command without any pre-configured scope."
+commands.deny = ["sendMessage"]
