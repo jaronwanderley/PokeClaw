@@ -1095,6 +1095,23 @@ mod desktop_commands {
 }
 
 // ---------------------------------------------------------------------------
+// AndroidPluginHandle — wraps the Tauri PluginHandle for managed state
+// ---------------------------------------------------------------------------
+
+/// Wrapper around Tauri's `PluginHandle` that can be stored in managed state.
+/// This allows `AndroidToolExecutor` to retrieve it at runtime and dispatch
+/// tool calls to Kotlin @Command methods via `run_mobile_plugin()`.
+#[cfg(target_os = "android")]
+pub struct AndroidPluginHandle<R: Runtime>(pub tauri::plugin::PluginHandle<R>);
+
+#[cfg(target_os = "android")]
+impl<R: Runtime> Clone for AndroidPluginHandle<R> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Plugin initialization
 // ---------------------------------------------------------------------------
 
@@ -1110,7 +1127,11 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             #[cfg(target_os = "ios")]
             _api.register_ios_plugin(init_plugin_pokeclaw)?;
             #[cfg(target_os = "android")]
-            _api.register_android_plugin("io.agents.pokeclaw", "PokeclawPlugin")?;
+            {
+                let plugin_handle = _api.register_android_plugin("io.agents.pokeclaw", "PokeclawPlugin")?;
+                app.manage(AndroidPluginHandle(plugin_handle));
+                log::info!("init: AndroidPluginHandle stored in managed state");
+            }
             Ok(())
         });
 

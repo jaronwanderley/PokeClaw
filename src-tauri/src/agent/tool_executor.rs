@@ -5,6 +5,9 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[cfg(target_os = "android")]
+use tauri::Manager;
+
 // ---------------------------------------------------------------------------
 // Desktop real-OS imports (gated same as DesktopToolExecutor)
 // Three-way: exclude both Android and iOS from desktop-only modules.
@@ -423,52 +426,114 @@ impl ToolExecutor for IosToolExecutor {
 }
 
 // ---------------------------------------------------------------------------
-// AndroidToolExecutor — stub for Android compilation.
-// Android tool calls are handled by the Kotlin plugin layer via Tauri IPC;
-// this executor exists so the Rust agent loop can compile on Android without
-// importing desktop-only modules (xcap, enigo, etc.).
-// Real Android tool execution will route through Kotlin @Command IPC in S02.
+// AndroidToolExecutor — routes tool execution to Kotlin @Command via IPC.
+// Uses Tauri's PluginHandle.run_mobile_plugin() to dispatch each tool call
+// to the corresponding Kotlin method on the Android side.
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "android")]
-pub struct AndroidToolExecutor;
-
-#[cfg(target_os = "android")]
-impl AndroidToolExecutor {
-    pub fn new() -> Self {
-        info!("AndroidToolExecutor created — tools handled by Kotlin plugin via IPC");
-        Self
-    }
+pub struct AndroidToolExecutor {
+    app: tauri::AppHandle,
 }
 
 #[cfg(target_os = "android")]
-impl Default for AndroidToolExecutor {
-    fn default() -> Self {
-        Self::new()
+impl AndroidToolExecutor {
+    pub fn new(app: tauri::AppHandle) -> Self {
+        info!("AndroidToolExecutor created — routing tools via PluginHandle IPC");
+        Self { app }
     }
 }
 
 #[cfg(target_os = "android")]
 impl ToolExecutor for AndroidToolExecutor {
-    fn execute(&self, tool_name: &str, _params: Value) -> ToolResult {
-        info!(
-            "AndroidToolExecutor: tool '{}' — will be dispatched to Kotlin plugin via IPC",
-            tool_name
-        );
-        ToolResult {
-            success: false,
-            data: None,
-            error: Some(format!(
-                "Android IPC routing not yet wired — tool '{}' requires Kotlin @Command dispatch",
-                tool_name
-            )),
+    fn execute(&self, tool_name: &str, params: Value) -> ToolResult {
+        let start = std::time::Instant::now();
+        info!("AndroidToolExecutor: dispatching tool '{}' via IPC", tool_name);
+
+        // Retrieve the AndroidPluginHandle from managed state
+        let plugin_handle = match self.app.try_state::<tauri_plugin_pokeclaw::AndroidPluginHandle<tauri::Wry>>() {
+            Some(handle) => handle.0.clone(),
+            None => {
+                log::error!("AndroidToolExecutor: AndroidPluginHandle not found in managed state — plugin not registered?");
+                return ToolResult {
+                    success: false,
+                    data: None,
+                    error: Some("AndroidPluginHandle not available — plugin not initialized".to_string()),
+                };
+            }
+        };
+
+        // Dispatch to Kotlin @Command via run_mobile_plugin
+        let ipc_result: Result<serde_json::Value, _> = plugin_handle.run_mobile_plugin(tool_name, params.clone());
+        match ipc_result {
+            Ok(response_value) => {
+                let elapsed = start.elapsed();
+                info!(
+                    "AndroidToolExecutor: tool '{}' completed in {:?} — IPC success",
+                    tool_name, elapsed
+                );
+                // The Kotlin @Command methods return ToolResult-shaped JSON:
+                // { success: bool, data: Any?, error: String? }
+                let success = response_value
+                    .get("success")
+                    .and_then(|v: &Value| v.as_bool())
+                    .unwrap_or(true);
+                let data = response_value.get("data").cloned();
+                let error = response_value
+                    .get("error")
+                    .and_then(|v: &Value| v.as_str())
+                    .map(|s: &str| s.to_string());
+
+                ToolResult { success, data, error }
+            }
+            Err(e) => {
+                let elapsed = start.elapsed();
+                log::error!(
+                    "AndroidToolExecutor: tool '{}' failed in {:?} — IPC error: {}",
+                    tool_name, elapsed, e
+                );
+                ToolResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("Kotlin IPC error for '{}': {}", tool_name, e)),
+                }
+            }
         }
     }
 
     fn available_tools(&self) -> Vec<String> {
-        // Android tools are registered via the Kotlin plugin, not through this executor.
-        // The tool registry still defines all 28 tools for LLM schema generation.
-        vec![]
+        // The tool registry defines all 28 tools for LLM schema generation.
+        // Android routes all of them through Kotlin IPC.
+        vec![
+            "get_screen_info".into(),
+            "find_node_info".into(),
+            "input_text".into(),
+            "system_key".into(),
+            "open_app".into(),
+            "get_installed_apps".into(),
+            "take_screenshot".into(),
+            "wait".into(),
+            "repeat_actions".into(),
+            "clipboard".into(),
+            "send_file".into(),
+            "get_device_info".into(),
+            "get_notifications".into(),
+            "make_call".into(),
+            "finish".into(),
+            "kb_write".into(),
+            "kb_read".into(),
+            "kb_search".into(),
+            "kb_append".into(),
+            "kb_add_todo".into(),
+            "tap".into(),
+            "tap_node".into(),
+            "long_press".into(),
+            "swipe".into(),
+            "scroll_to_find".into(),
+            "find_and_tap".into(),
+            "send_message".into(),
+            "auto_reply".into(),
+        ]
     }
 }
 
@@ -488,6 +553,30 @@ pub type ToolExecutorHandle = IosToolExecutor;
 
 #[cfg(target_os = "android")]
 pub type ToolExecutorHandle = AndroidToolExecutor;
+
+// ---------------------------------------------------------------------------
+// Platform-aware factory: creates the right executor for the current platform.
+// On desktop/iOS, the AppHandle is ignored. On Android, it's used to retrieve
+// the PluginHandle for Kotlin IPC routing.
+// ---------------------------------------------------------------------------
+
+/// Create a platform-appropriate ToolExecutor.
+/// On Android, the `app` handle is used to retrieve the AndroidPluginHandle
+/// from managed state for Kotlin IPC routing. On desktop/iOS, `app` is ignored.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn create_executor(_app: &tauri::AppHandle) -> DesktopToolExecutor {
+    DesktopToolExecutor::new()
+}
+
+#[cfg(target_os = "ios")]
+pub fn create_executor(_app: &tauri::AppHandle) -> IosToolExecutor {
+    IosToolExecutor::new()
+}
+
+#[cfg(target_os = "android")]
+pub fn create_executor(app: &tauri::AppHandle) -> AndroidToolExecutor {
+    AndroidToolExecutor::new(app.clone())
+}
 
 // ---------------------------------------------------------------------------
 // Tests

@@ -23,7 +23,7 @@ use crate::agent::skill::executor::SkillExecutor;
 use crate::agent::skill::registry::SkillRegistry;
 use crate::agent::task_event::TaskEvent;
 use crate::agent::tool_executor::{
-    AgentRoundResult, ToolExecutorHandle as DesktopToolExecutor, TokenUsage, ToolCallResult, ToolExecutor,
+    AgentRoundResult, TokenUsage, ToolCallResult, ToolExecutor,
 };
 use crate::agent::tool_registry::ToolRegistry;
 use crate::db::chat::ChatMessageRecord;
@@ -118,6 +118,7 @@ pub struct TestAgentRoundRequest {
 /// Execute one agent round: prompt → LLM → tool execution → result.
 #[tauri::command]
 pub async fn test_agent_round(
+    app: AppHandle,
     state: State<'_, AgentState>,
     prompt: String,
     system_prompt: Option<String>,
@@ -213,7 +214,7 @@ pub async fn test_agent_round(
     let tool_call_result = if let Some(tc) = llm_response.tool_calls.first() {
         info!("test_agent_round: executing tool '{}' with args: {}", tc.name, tc.arguments);
 
-        let executor = DesktopToolExecutor::new();
+        let executor = crate::agent::tool_executor::create_executor(&app);
         let args: serde_json::Value = serde_json::from_str(&tc.arguments).unwrap_or_else(|e| {
             warn!("test_agent_round: failed to parse tool arguments as JSON: {} — using empty object", e);
             serde_json::json!({})
@@ -409,7 +410,7 @@ pub async fn start_task(
                 tool_name, description
             );
 
-            let executor = DesktopToolExecutor::new();
+            let executor = crate::agent::tool_executor::create_executor(&app);
             let emitter = ChannelEventEmitter::new(on_event);
 
             // Emit events for frontend visibility
@@ -528,7 +529,7 @@ pub async fn start_task(
             let _skill_description = description.clone();
 
             tokio::spawn(async move {
-                let executor = DesktopToolExecutor::new();
+                let executor = crate::agent::tool_executor::create_executor(&app);
                 let emitter = ChannelEventEmitter::new(on_event);
 
                 // Emit LoopStart for frontend visibility
@@ -622,7 +623,7 @@ pub async fn start_task(
                                 })))
                             }
                         };
-                        let agent_executor = DesktopToolExecutor::new();
+                        let agent_executor = crate::agent::tool_executor::create_executor(&app);
                         let registry = ToolRegistry::default();
                         let config = AgentConfig::default();
                         let agent_emitter = ChannelEventEmitterWrapper { inner: emitter };
@@ -680,7 +681,7 @@ pub async fn start_task(
             };
 
             tokio::spawn(async move {
-                let executor = DesktopToolExecutor::new();
+                let executor = crate::agent::tool_executor::create_executor(&app);
                 let registry = ToolRegistry::default();
                 let config = AgentConfig::default();
                 let emitter = ChannelEventEmitter::new(on_event);
