@@ -23,9 +23,9 @@ tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-pokeclaw = { path = "../tauri-plugin-pokeclaw" }
 tauri-plugin-dialog = "2"
-async-openai = { version = "0.34", features = ["chat-completion"] }
+async-openai = { version = "0.34", features = ["chat-completion", "rustls"] }
 tokio = { version = "1", features = ["macros", "time"] }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 chrono = "0.4"
 async-trait = "0.1"
 regex = "1"

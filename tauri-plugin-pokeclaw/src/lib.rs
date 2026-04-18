@@ -219,9 +219,11 @@ mod session_impl {
             // Build output directory
             std::path::PathBuf::from("target/release/litertlm_bridge.dll"),
             std::path::PathBuf::from("target/release/litertlm_bridge.so"),
+            std::path::PathBuf::from("target/release/litertlm_bridge.dylib"),
             // CMake build output
             std::path::PathBuf::from("tauri-plugin-pokeclaw/src/desktop/ffi/build/output/litertlm_bridge.dll"),
             std::path::PathBuf::from("tauri-plugin-pokeclaw/src/desktop/ffi/build/output/litertlm_bridge.so"),
+            std::path::PathBuf::from("tauri-plugin-pokeclaw/src/desktop/ffi/build/output/litertlm_bridge.dylib"),
         ];
         for candidate in &candidates {
             if candidate.exists() {

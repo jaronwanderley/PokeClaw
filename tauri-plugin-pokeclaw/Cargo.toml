@@ -14,7 +14,7 @@ log = "0.4"
 tokio = { version = "1", features = ["time"] }
 
 # Desktop-only: dynamic library loading for LiteRT-LM FFI shim
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 libloading = "0.8"
 reqwest = { version = "0.12", features = ["stream"] }
 futures-util = "0.3"

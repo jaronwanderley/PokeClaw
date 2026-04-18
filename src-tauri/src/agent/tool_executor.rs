@@ -423,11 +423,61 @@ impl ToolExecutor for IosToolExecutor {
 }
 
 // ---------------------------------------------------------------------------
+// AndroidToolExecutor — stub for Android compilation.
+// Android tool calls are handled by the Kotlin plugin layer via Tauri IPC;
+// this executor exists so the Rust agent loop can compile on Android without
+// importing desktop-only modules (xcap, enigo, etc.).
+// Real Android tool execution will route through Kotlin @Command IPC in S02.
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "android")]
+pub struct AndroidToolExecutor;
+
+#[cfg(target_os = "android")]
+impl AndroidToolExecutor {
+    pub fn new() -> Self {
+        info!("AndroidToolExecutor created — tools handled by Kotlin plugin via IPC");
+        Self
+    }
+}
+
+#[cfg(target_os = "android")]
+impl Default for AndroidToolExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "android")]
+impl ToolExecutor for AndroidToolExecutor {
+    fn execute(&self, tool_name: &str, _params: Value) -> ToolResult {
+        info!(
+            "AndroidToolExecutor: tool '{}' — will be dispatched to Kotlin plugin via IPC",
+            tool_name
+        );
+        ToolResult {
+            success: false,
+            data: None,
+            error: Some(format!(
+                "Android IPC routing not yet wired — tool '{}' requires Kotlin @Command dispatch",
+                tool_name
+            )),
+        }
+    }
+
+    fn available_tools(&self) -> Vec<String> {
+        // Android tools are registered via the Kotlin plugin, not through this executor.
+        // The tool registry still defines all 28 tools for LLM schema generation.
+        vec![]
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ToolExecutorHandle — platform-specific type alias
 //
 // Consumers (loop_runner.rs, commands.rs) use this instead of directly
-// naming DesktopToolExecutor or IosToolExecutor, avoiding the need for
-// cfg gates at every call site.
+// naming DesktopToolExecutor, IosToolExecutor, or AndroidToolExecutor,
+// avoiding the need for cfg gates at every call site.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -435,6 +485,9 @@ pub type ToolExecutorHandle = DesktopToolExecutor;
 
 #[cfg(target_os = "ios")]
 pub type ToolExecutorHandle = IosToolExecutor;
+
+#[cfg(target_os = "android")]
+pub type ToolExecutorHandle = AndroidToolExecutor;
 
 // ---------------------------------------------------------------------------
 // Tests

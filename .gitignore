@@ -50,3 +50,4 @@ vendor/
 coverage/
 .cache/
 tmp/
+/src-tauri/*.png
