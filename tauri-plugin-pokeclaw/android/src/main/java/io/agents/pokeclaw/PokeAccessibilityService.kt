@@ -4,6 +4,8 @@
 package io.agents.pokeclaw
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
+import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
@@ -489,43 +491,46 @@ class PokeAccessibilityService : AccessibilityService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
 
         try {
-            val metrics = resources.displayMetrics
-
             val latch = java.util.concurrent.CountDownLatch(1)
             var resultPath: String? = null
             var errorMsg: String? = null
 
+            val mainExecutor = java.util.concurrent.Executor { cmd -> android.os.Handler(Looper.getMainLooper()).post(cmd) }
+
             takeScreenshot(
                 android.view.Display.DEFAULT_DISPLAY,
-                { callback ->
-                    try {
-                        val hardwareBuffer = callback.hardwareBuffer
-                        val androidBitmap = android.graphics.Bitmap.wrapHardwareBuffer(hardwareBuffer, null)
-                            ?: throw RuntimeException("Failed to wrap HardwareBuffer")
-                        val outputFile = java.io.File(
-                            filePath ?: "${cacheDir.absolutePath}/screenshot_${System.currentTimeMillis()}.png"
-                        )
-                        outputFile.parentFile?.mkdirs()
-                        val fos = java.io.FileOutputStream(outputFile)
-                        androidBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, fos)
-                        fos.flush()
-                        fos.close()
-                        resultPath = outputFile.absolutePath
-                        Log.i(TAG, "takeScreenshot: saved to ${outputFile.absolutePath}")
-                    } catch (e: Exception) {
-                        errorMsg = e.message
-                        Log.e(TAG, "takeScreenshot: failed to save bitmap", e)
-                    } finally {
-                        callback.hardwareBuffer.close()
+                mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        try {
+                            val hardwareBuffer = screenshot.hardwareBuffer
+                            val androidBitmap = android.graphics.Bitmap.wrapHardwareBuffer(hardwareBuffer, null)
+                                ?: throw RuntimeException("Failed to wrap HardwareBuffer")
+                            val outputFile = java.io.File(
+                                filePath ?: "${cacheDir.absolutePath}/screenshot_${System.currentTimeMillis()}.png"
+                            )
+                            outputFile.parentFile?.mkdirs()
+                            val fos = java.io.FileOutputStream(outputFile)
+                            androidBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, fos)
+                            fos.flush()
+                            fos.close()
+                            resultPath = outputFile.absolutePath
+                            Log.i(TAG, "takeScreenshot: saved to ${outputFile.absolutePath}")
+                        } catch (e: Exception) {
+                            errorMsg = e.message
+                            Log.e(TAG, "takeScreenshot: failed to save bitmap", e)
+                        } finally {
+                            screenshot.hardwareBuffer.close()
+                            latch.countDown()
+                        }
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        errorMsg = "takeScreenshot failed with error code: $errorCode"
+                        Log.e(TAG, "takeScreenshot: $errorMsg")
                         latch.countDown()
                     }
-                },
-                { errorCode ->
-                    errorMsg = "takeScreenshot failed with error code: $errorCode"
-                    Log.e(TAG, "takeScreenshot: $errorMsg")
-                    latch.countDown()
-                },
-                android.os.Handler(Looper.getMainLooper())
+                }
             )
 
             val completed = latch.await(5, TimeUnit.SECONDS)

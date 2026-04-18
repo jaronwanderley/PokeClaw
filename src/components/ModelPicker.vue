@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useModel } from '../composables/useModel'
 
 const emit = defineEmits<{
@@ -7,19 +7,39 @@ const emit = defineEmits<{
 }>()
 
 const {
-  modelList,
-  isDownloading,
-  downloadProgress,
-  selectedModelPath,
-  fetchModels,
-  pickModelFile,
-  downloadModel,
-  startSession,
+  getSafFolderStatus,
+  pickSafFolder,
+  hasSafPermission,
+  safFolderName,
 } = useModel()
 
+
+async function checkSafStatus() {
+  if (isAndroid) {
+    const status = await getSafFolderStatus()
+    if (status.hasPermission) {
+      fetchModels()
+    }
+  } else {
+    fetchModels()
+  }
+}
+
 onMounted(() => {
-  fetchModels()
+  checkSafStatus()
 })
+
+async function handlePickSafFolder() {
+  const result = await pickSafFolder()
+  if (result) {
+    await checkSafStatus()
+  }
+}
+
+const isAndroid = /android/i.test(navigator.userAgent)
+const urlInput = ref('')
+const showUrlPanel = ref(false)
+const urlError = ref<string | null>(null)
 
 const downloadPercent = computed(() => {
   if (downloadProgress.value.totalBytes === 0) return 0
@@ -32,12 +52,17 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1_000).toFixed(0)} KB`
 }
 
+function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec >= 1_000_000_000) return `${(bytesPerSec / 1_000_000_000).toFixed(1)} GB/s`
+  if (bytesPerSec >= 1_000_000) return `${(bytesPerSec / 1_000_000).toFixed(0)} MB/s`
+  if (bytesPerSec >= 1_000) return `${(bytesPerSec / 1_000).toFixed(0)} KB/s`
+  return `${bytesPerSec} B/s`
+}
+
 async function handleLoad(modelPath: string) {
   selectedModelPath.value = modelPath
   const result = await startSession()
-  if (result) {
-    emit('sessionStarted')
-  }
+  if (result) emit('sessionStarted')
 }
 
 async function handlePickFile() {
@@ -45,14 +70,68 @@ async function handlePickFile() {
   if (path) {
     selectedModelPath.value = path
     const result = await startSession()
-    if (result) {
-      emit('sessionStarted')
-    }
+    if (result) emit('sessionStarted')
   }
 }
 
 async function handleDownload(modelId: string) {
   await downloadModel(modelId)
+  if (selectedModelPath.value) {
+    const result = await startSession()
+    if (result) emit('sessionStarted')
+  }
+}
+
+function getGemmaUrl(variant: 'e2b' | 'e4b'): { url: string; fileName: string } {
+  if (variant === 'e2b') {
+    return {
+      url: 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
+      fileName: 'gemma-4-E2B-it.litertlm',
+    }
+  }
+  return {
+    url: 'https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm',
+    fileName: 'gemma-4-E4B-it.litertlm',
+  }
+}
+
+async function handleQuickDownload(variant: 'e2b' | 'e4b') {
+  urlError.value = null
+  const { url, fileName } = getGemmaUrl(variant)
+  urlInput.value = url
+  await downloadFromUrl(url, fileName)
+  if (selectedModelPath.value) {
+    const result = await startSession()
+    if (result) emit('sessionStarted')
+  }
+}
+
+async function handleUrlDownload() {
+  urlError.value = null
+  const url = urlInput.value.trim()
+  if (!url) {
+    urlError.value = 'Paste a download link first.'
+    return
+  }
+  try { new URL(url) } catch {
+    urlError.value = 'Invalid URL. Paste a direct download link for a .litertlm file.'
+    return
+  }
+
+  // Extract filename from URL
+  const urlPath = url.split('?')[0]
+  const fileName = urlPath.split('/').pop() || 'model.litertlm'
+
+  await downloadFromUrl(url, fileName)
+  if (selectedModelPath.value) {
+    const result = await startSession()
+    if (result) emit('sessionStarted')
+  }
+}
+
+function toggleUrlPanel() {
+  showUrlPanel.value = !showUrlPanel.value
+  urlError.value = null
 }
 </script>
 
@@ -63,16 +142,116 @@ async function handleDownload(modelId: string) {
       <div class="picker-subtitle">Choose a model to start chatting</div>
     </div>
 
-    <!-- Pick from device button -->
-    <button class="pick-file-btn" @click="handlePickFile">
+    <!-- Android SAF Folder Setup -->
+    <div v-if="isAndroid && !hasSafPermission" class="saf-setup-card">
+      <div class="saf-icon">📂</div>
+      <div class="saf-info">
+        <div class="saf-title">Pasta de Modelos (SAF)</div>
+        <div class="saf-desc">Escolha uma pasta para manter seus modelos centralizados e economizar espaço.</div>
+      </div>
+      <button class="saf-btn" @click="handlePickSafFolder">
+        Selecionar Pasta
+      </button>
+    </div>
+
+    <!-- Pick from device (only if not Android or has permission) -->
+    <button v-if="!isAndroid" class="pick-file-btn" @click="handlePickFile">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
         <path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z" />
       </svg>
-      Pick from device
+      {{ isAndroid ? 'Pick from device' : 'Pick from device' }}
     </button>
 
-    <!-- Model list -->
-    <div class="model-list">
+    <!-- Content visible after SAF setup -->
+    <template v-if="!isAndroid || hasSafPermission">
+      <div v-if="isAndroid" class="saf-current-folder">
+        <span class="saf-label">Pasta Atual:</span>
+        <span class="saf-name">{{ safFolderName || 'Shared Models' }}</span>
+        <button class="saf-change-btn" @click="handlePickSafFolder">Alterar</button>
+      </div>
+
+      <!-- Download a model -->
+      <button class="pick-file-btn url-toggle" @click="toggleUrlPanel">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+        </svg>
+        {{ showUrlPanel ? 'Hide download panel' : 'Download a model' }}
+      </button>
+    </template>
+
+    <!-- Download panel -->
+    <div v-if="showUrlPanel" class="url-panel">
+      <!-- Quick download buttons -->
+      <div class="quick-downloads">
+        <div class="section-label">Quick download</div>
+        <div class="quick-btns">
+          <button
+            class="quick-btn"
+            :disabled="isDownloading"
+            @click="handleQuickDownload('e2b')"
+          >
+            Gemma 4 E2B
+            <span class="quick-btn-size">2.6 GB</span>
+          </button>
+          <button
+            class="quick-btn"
+            :disabled="isDownloading"
+            @click="handleQuickDownload('e4b')"
+          >
+            Gemma 4 E4B
+            <span class="quick-btn-size">3.6 GB</span>
+          </button>
+        </div>
+        <div class="quick-hint">
+          {{ isAndroid ? `Saves to: ${safFolderName || 'Shared Models'}` : 'Saves to your models folder' }}
+        </div>
+      </div>
+
+      <!-- Custom URL input -->
+      <div class="url-input-section">
+        <div class="section-label">Or paste a custom link</div>
+        <div class="url-row">
+          <input
+            v-model="urlInput"
+            type="url"
+            placeholder="https://example.com/model.litertlm"
+            class="url-input"
+            :disabled="isDownloading"
+            @keydown.enter="handleUrlDownload"
+          />
+          <button
+            class="download-url-btn"
+            :disabled="isDownloading || !urlInput.trim()"
+            @click="handleUrlDownload"
+          >
+            Download
+          </button>
+        </div>
+        <div v-if="urlError" class="url-error">{{ urlError }}</div>
+      </div>
+
+      <!-- Download progress -->
+      <div v-if="isDownloading" class="download-progress compact">
+        <div class="progress-bar wide">
+          <div class="progress-fill" :style="{ width: downloadPercent + '%' }"></div>
+        </div>
+        <div class="progress-details">
+          <span class="progress-text">{{ downloadPercent }}%</span>
+          <span v-if="downloadProgress.bytesPerSecond > 0" class="progress-speed">
+            {{ formatSpeed(downloadProgress.bytesPerSecond) }}
+          </span>
+          <span class="progress-bytes">
+            {{ formatSize(downloadProgress.bytesDownloaded) }}
+            <span v-if="downloadProgress.totalBytes > 0">
+              / {{ formatSize(downloadProgress.totalBytes) }}
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Model list from catalog -->
+    <div v-if="!isAndroid || hasSafPermission" class="model-list">
       <div v-for="model in modelList" :key="model.id" class="model-card">
         <div class="model-info">
           <div class="model-name">{{ model.displayName }}</div>
@@ -81,7 +260,6 @@ async function handleDownload(modelId: string) {
           </div>
         </div>
 
-        <!-- Download progress bar (replaces button during download) -->
         <div v-if="isDownloading" class="download-progress">
           <div class="progress-bar">
             <div class="progress-fill" :style="{ width: downloadPercent + '%' }"></div>
@@ -89,7 +267,6 @@ async function handleDownload(modelId: string) {
           <div class="progress-text">{{ downloadPercent }}%</div>
         </div>
 
-        <!-- Download button -->
         <button
           v-else-if="!model.isDownloaded"
           class="action-btn download-btn"
@@ -99,7 +276,6 @@ async function handleDownload(modelId: string) {
           Download
         </button>
 
-        <!-- Load button (model already downloaded) -->
         <button
           v-else
           class="action-btn load-btn"
@@ -110,9 +286,8 @@ async function handleDownload(modelId: string) {
       </div>
     </div>
 
-    <!-- Empty state -->
-    <div v-if="modelList.length === 0 && !isDownloading" class="empty-state">
-      No models available. Pick a model file from your device to get started.
+    <div v-if="modelList.length === 0 && !isDownloading && !showUrlPanel" class="empty-state">
+      No models available. Tap "Download a model" to get started.
     </div>
   </div>
 </template>
@@ -123,6 +298,8 @@ async function handleDownload(modelId: string) {
   flex-direction: column;
   padding: 16px;
   gap: 12px;
+  max-width: 640px;
+  margin: 0 auto;
 }
 
 .picker-header {
@@ -141,6 +318,86 @@ async function handleDownload(modelId: string) {
   margin-top: 4px;
 }
 
+.pick-file-btn:hover {
+  background: var(--aib);
+  border-color: var(--accent);
+}
+
+.saf-setup-card {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  background: var(--ai);
+  border: 1px solid var(--aib);
+  border-radius: 12px;
+  gap: 12px;
+}
+
+.saf-icon {
+  font-size: 24px;
+}
+
+.saf-info {
+  flex: 1;
+}
+
+.saf-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--t1);
+}
+
+.saf-desc {
+  font-size: 11px;
+  color: var(--t2);
+  margin-top: 2px;
+}
+
+.saf-btn {
+  padding: 8px 12px;
+  background: var(--accent);
+  color: #151211;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.saf-current-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.saf-label {
+  color: var(--t2);
+  font-weight: 600;
+}
+
+.saf-name {
+  color: var(--accent);
+  font-weight: 700;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saf-change-btn {
+  background: transparent;
+  border: none;
+  color: var(--t2);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .pick-file-btn {
   display: flex;
   align-items: center;
@@ -157,13 +414,178 @@ async function handleDownload(modelId: string) {
   transition: all 0.15s;
 }
 
-.pick-file-btn:hover {
-  background: var(--aib);
+.pick-file-btn:active {
+  transform: scale(0.98);
+}
+
+.url-toggle {
+  border-style: solid;
+  background: var(--surface);
+}
+
+.url-toggle:hover {
+  background: var(--ai);
+}
+
+.url-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.quick-downloads {
+  display: flex;
+  flex-direction: column;
+}
+
+.quick-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.quick-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px 12px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #151211;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.quick-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.quick-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.quick-btn-size {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.quick-hint {
+  font-size: 11px;
+  color: var(--t2);
+  text-align: center;
+  margin-top: 6px;
+}
+
+.url-input-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.url-row {
+  display: flex;
+  gap: 8px;
+}
+
+.url-input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--t1);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.url-input:focus {
   border-color: var(--accent);
 }
 
-.pick-file-btn:active {
-  transform: scale(0.98);
+.url-input:disabled {
+  opacity: 0.5;
+}
+
+.url-input::placeholder {
+  color: var(--t2);
+}
+
+.download-url-btn {
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #151211;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.download-url-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.download-url-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.url-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #e74c3c;
+  font-weight: 500;
+}
+
+.download-progress.compact {
+  padding-top: 4px;
+}
+
+.progress-bar.wide {
+  width: 100%;
+}
+
+.progress-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.progress-speed {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.progress-bytes {
+  font-size: 11px;
+  color: var(--t2);
 }
 
 .model-list {

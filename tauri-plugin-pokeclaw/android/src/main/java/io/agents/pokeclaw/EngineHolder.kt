@@ -21,6 +21,7 @@ object EngineHolder {
     private var engine: Engine? = null
     private var currentModelPath: String? = null
     private var currentBackendLabel: String? = null
+    private var currentPfd: android.os.ParcelFileDescriptor? = null
 
     private fun backendLabel(backend: Backend): String =
         if (backend is Backend.CPU) "CPU"
@@ -31,15 +32,21 @@ object EngineHolder {
      * Return the existing Engine if the model path matches, otherwise close the
      * old one and create a fresh Engine for the new model.
      *
-     * @param modelPath  absolute path to the .task model file
+     * @param modelPath  absolute path to the .task model file or /proc/self/fd/..
+     * @param pfd        optional ParcelFileDescriptor to keep alive for the engine
      * @param cacheDir   app's cacheDir.path
      * @param backend    CPU or GPU backend
      */
     @Synchronized
-    fun getOrCreate(modelPath: String, cacheDir: String, backend: Backend): Engine {
+    fun getOrCreate(modelPath: String, pfd: android.os.ParcelFileDescriptor?, cacheDir: String, backend: Backend): Engine {
         val existing = engine
         if (existing != null && currentModelPath == modelPath) {
             Log.d(TAG, "getOrCreate: reusing engine for $modelPath (${currentBackendLabel ?: "unknown"})")
+            // If the caller provided a new PFD for the same existing model path, close it to avoid leaks.
+            // (Typically won't happen because they reuse the same path string)
+            if (pfd != null && pfd != currentPfd) {
+                try { pfd.close() } catch (e: Exception) {}
+            }
             return existing
         }
 
@@ -49,8 +56,10 @@ object EngineHolder {
             try { existing.close() } catch (e: Exception) {
                 Log.w(TAG, "getOrCreate: error closing old engine: ${e.message}")
             }
+            try { currentPfd?.close() } catch (e: Exception) {}
             engine = null
             currentModelPath = null
+            currentPfd = null
         }
 
         Log.i(TAG, "getOrCreate: creating new engine for $modelPath with ${backend.javaClass.simpleName}")
@@ -65,10 +74,13 @@ object EngineHolder {
             engine = newEngine
             currentModelPath = modelPath
             currentBackendLabel = backendLabel(backend)
+            currentPfd = pfd
             Log.i(TAG, "getOrCreate: engine ready for $modelPath ($currentBackendLabel)")
             newEngine
         } catch (e: Exception) {
             Log.e(TAG, "getOrCreate: failed to create engine for $modelPath: ${e.message}")
+            // Close the new PFD if engine creation failed so it doesn't leak
+            try { pfd?.close() } catch (closeEx: Exception) {}
             throw e
         }
     }
@@ -84,9 +96,11 @@ object EngineHolder {
         try { engine?.close() } catch (e: Exception) {
             Log.w(TAG, "close: error closing engine: ${e.message}")
         }
+        try { currentPfd?.close() } catch (e: Exception) {}
         engine = null
         currentModelPath = null
         currentBackendLabel = null
+        currentPfd = null
         Log.i(TAG, "close: done")
     }
 

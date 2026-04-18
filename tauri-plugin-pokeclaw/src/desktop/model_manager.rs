@@ -391,6 +391,203 @@ pub async fn download_model(
 }
 
 // ---------------------------------------------------------------------------
+// download_model_from_url — download from arbitrary URL to chosen directory
+// ---------------------------------------------------------------------------
+
+/// Download a model file from an arbitrary URL to a user-chosen directory.
+///
+/// Unlike `download_model` which uses the static catalog, this function
+/// accepts any URL and saves to the specified destination directory.
+/// If `save_dir` is empty, falls back to the default models directory.
+/// The file name is extracted from the URL path (or defaults to "model.litertlm").
+///
+/// # Arguments
+/// * `url` — Direct download URL for a .litertlm model file.
+/// * `save_dir` — Directory where the file should be saved. Empty = use default.
+/// * `channel` — Tauri Channel to send progress events.
+pub async fn download_model_from_url(
+    url: &str,
+    save_dir: &str,
+    channel: &tauri::ipc::Channel<DownloadEvent>,
+) -> Result<(), String> {
+    // If save_dir is empty, use default models directory
+    let resolved_dir = if save_dir.is_empty() {
+        let dir = models_dir();
+        log::info!("download_model_from_url: save_dir empty, using default='{}'", dir.display());
+        dir
+    } else {
+        PathBuf::from(save_dir)
+    };
+
+    log::info!(
+        "download_model_from_url: url='{}', save_dir='{}'",
+        url,
+        resolved_dir.display()
+    );
+
+    // Extract file name from URL
+    let file_name = extract_filename_from_url(url);
+    log::info!("download_model_from_url: resolved fileName='{}'", file_name);
+
+    // Ensure save directory exists
+    if let Err(e) = std::fs::create_dir_all(&resolved_dir) {
+        let msg = format!(
+            "Failed to create save directory '{}': {}",
+            resolved_dir.display(),
+            e
+        );
+        log::error!("download_model_from_url: {}", msg);
+        let _ = channel.send(DownloadEvent::Error {
+            message: msg.clone(),
+        });
+        return Err(msg);
+    }
+
+    let dest_path = resolved_dir.join(&file_name);
+
+    // Perform the HTTP GET request
+    let response = reqwest::get(url).await.map_err(|e| {
+        let msg = format!("HTTP request failed for '{}': {}", url, e);
+        log::error!("download_model_from_url: {}", msg);
+        let _ = channel.send(DownloadEvent::Error {
+            message: msg.clone(),
+        });
+        msg
+    })?;
+
+    let http_status = response.status();
+    if !http_status.is_success() {
+        let msg = format!("HTTP {} for '{}'", http_status, url);
+        log::error!("download_model_from_url: {}", msg);
+        let _ = channel.send(DownloadEvent::Error {
+            message: msg.clone(),
+        });
+        return Err(msg);
+    }
+
+    let content_length = response.content_length().unwrap_or(0);
+    log::info!(
+        "download_model_from_url: HTTP {} OK — content_length={} bytes",
+        http_status,
+        content_length
+    );
+
+    // Stream the response body to file with progress tracking
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut file = std::fs::File::create(&dest_path).map_err(|e| {
+        let msg = format!(
+            "Failed to create file '{}': {}",
+            dest_path.display(),
+            e
+        );
+        log::error!("download_model_from_url: {}", msg);
+        let _ = channel.send(DownloadEvent::Error {
+            message: msg.clone(),
+        });
+        msg
+    })?;
+
+    let mut bytes_downloaded: u64 = 0;
+    let mut last_progress_time = std::time::Instant::now();
+    let mut last_progress_bytes: u64 = 0;
+    let progress_interval = std::time::Duration::from_millis(250);
+
+    use std::io::Write;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| {
+            let msg = format!("Download stream error: {}", e);
+            log::error!("download_model_from_url: {}", msg);
+            let _ = std::fs::remove_file(&dest_path);
+            let _ = channel.send(DownloadEvent::Error {
+                message: msg.clone(),
+            });
+            msg
+        })?;
+
+        file.write_all(&chunk).map_err(|e| {
+            let msg = format!("File write error for '{}': {}", dest_path.display(), e);
+            log::error!("download_model_from_url: {}", msg);
+            let _ = std::fs::remove_file(&dest_path);
+            let _ = channel.send(DownloadEvent::Error {
+                message: msg.clone(),
+            });
+            msg
+        })?;
+
+        bytes_downloaded += chunk.len() as u64;
+
+        let now = std::time::Instant::now();
+        if now.duration_since(last_progress_time) >= progress_interval {
+            let elapsed = now.duration_since(last_progress_time).as_secs_f64();
+            let bytes_in_interval = bytes_downloaded - last_progress_bytes;
+            let bytes_per_second = if elapsed > 0.0 {
+                (bytes_in_interval as f64 / elapsed) as u64
+            } else {
+                0
+            };
+
+            if let Err(e) = channel.send(DownloadEvent::Progress {
+                bytes_downloaded,
+                total_bytes: content_length,
+                bytes_per_second,
+            }) {
+                log::warn!(
+                    "download_model_from_url: channel send failed — {}: {}",
+                    bytes_downloaded,
+                    e
+                );
+                let _ = std::fs::remove_file(&dest_path);
+                return Ok(());
+            }
+
+            last_progress_time = now;
+            last_progress_bytes = bytes_downloaded;
+        }
+    }
+
+    file.flush().map_err(|e| {
+        let msg = format!("File flush error for '{}': {}", dest_path.display(), e);
+        log::error!("download_model_from_url: {}", msg);
+        let _ = channel.send(DownloadEvent::Error {
+            message: msg.clone(),
+        });
+        msg
+    })?;
+
+    let final_path = dest_path.to_string_lossy().to_string();
+    log::info!(
+        "download_model_from_url: complete — file='{}', bytes={}",
+        final_path,
+        bytes_downloaded
+    );
+
+    if let Err(e) = channel.send(DownloadEvent::Complete {
+        model_path: final_path.clone(),
+        file_name: file_name.clone(),
+    }) {
+        log::warn!("download_model_from_url: channel send failed for complete — {}", e);
+    }
+
+    Ok(())
+}
+
+/// Extract a filename from a URL path. Falls back to "model.litertlm".
+fn extract_filename_from_url(url: &str) -> String {
+    // Try to get the last path segment
+    if let Some(path) = url.split('?').next() {
+        if let Some(segment) = path.rsplit('/').next() {
+            let decoded = segment.replace("%20", " ");
+            if !decoded.is_empty() && decoded.contains('.') {
+                return decoded;
+            }
+        }
+    }
+    "model.litertlm".to_string()
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -477,5 +674,37 @@ mod tests {
         // the logic by checking the default path is reasonable
         let dir = models_dir();
         assert!(!dir.as_os_str().is_empty(), "Models dir should not be empty");
+    }
+
+    #[test]
+    fn extract_filename_from_url_basic() {
+        assert_eq!(
+            extract_filename_from_url("https://example.com/models/gemma-4-E2B-it.litertlm"),
+            "gemma-4-E2B-it.litertlm"
+        );
+    }
+
+    #[test]
+    fn extract_filename_from_url_with_query() {
+        assert_eq!(
+            extract_filename_from_url("https://huggingface.co/user/model/resolve/main/model.litertlm?download=true"),
+            "model.litertlm"
+        );
+    }
+
+    #[test]
+    fn extract_filename_from_url_no_extension() {
+        assert_eq!(
+            extract_filename_from_url("https://example.com/models/somefolder"),
+            "model.litertlm"
+        );
+    }
+
+    #[test]
+    fn extract_filename_from_url_empty() {
+        assert_eq!(
+            extract_filename_from_url(""),
+            "model.litertlm"
+        );
     }
 }

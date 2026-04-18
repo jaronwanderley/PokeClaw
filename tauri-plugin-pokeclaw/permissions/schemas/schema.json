@@ -295,6 +295,30 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the cacheSafModel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cacheSafModel",
+          "markdownDescription": "Enables the cacheSafModel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cacheSafModel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cacheSafModel",
+          "markdownDescription": "Denies the cacheSafModel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cache_saf_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cache-saf-model",
+          "markdownDescription": "Enables the cache_saf_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cache_saf_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cache-saf-model",
+          "markdownDescription": "Denies the cache_saf_model command without any pre-configured scope."
+        },
+        {
           "description": "Enables the chat command without any pre-configured scope.",
           "type": "string",
           "const": "allow-chat",
@@ -305,6 +329,18 @@
           "type": "string",
           "const": "deny-chat",
           "markdownDescription": "Denies the chat command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the checkPermissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-checkPermissions",
+          "markdownDescription": "Enables the checkPermissions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the checkPermissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-checkPermissions",
+          "markdownDescription": "Denies the checkPermissions command without any pre-configured scope."
         },
         {
           "description": "Enables the check_permissions command without any pre-configured scope.",
@@ -331,6 +367,54 @@
           "markdownDescription": "Denies the clipboard command without any pre-configured scope."
         },
         {
+          "description": "Enables the downloadModel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-downloadModel",
+          "markdownDescription": "Enables the downloadModel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the downloadModel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-downloadModel",
+          "markdownDescription": "Denies the downloadModel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the downloadModelFromUrl command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-downloadModelFromUrl",
+          "markdownDescription": "Enables the downloadModelFromUrl command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the downloadModelFromUrl command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-downloadModelFromUrl",
+          "markdownDescription": "Denies the downloadModelFromUrl command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the downloadToSaf command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-downloadToSaf",
+          "markdownDescription": "Enables the downloadToSaf command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the downloadToSaf command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-downloadToSaf",
+          "markdownDescription": "Denies the downloadToSaf command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the downloadToSafFolder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-downloadToSafFolder",
+          "markdownDescription": "Enables the downloadToSafFolder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the downloadToSafFolder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-downloadToSafFolder",
+          "markdownDescription": "Denies the downloadToSafFolder command without any pre-configured scope."
+        },
+        {
           "description": "Enables the download_model command without any pre-configured scope.",
           "type": "string",
           "const": "allow-download-model",
@@ -341,6 +425,66 @@
           "type": "string",
           "const": "deny-download-model",
           "markdownDescription": "Denies the download_model command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_model_from_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-download-model-from-url",
+          "markdownDescription": "Enables the download_model_from_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_model_from_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-download-model-from-url",
+          "markdownDescription": "Denies the download_model_from_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_to_saf command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-download-to-saf",
+          "markdownDescription": "Enables the download_to_saf command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_to_saf command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-download-to-saf",
+          "markdownDescription": "Denies the download_to_saf command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_to_saf_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-download-to-saf-folder",
+          "markdownDescription": "Enables the download_to_saf_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_to_saf_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-download-to-saf-folder",
+          "markdownDescription": "Denies the download_to_saf_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the findAndTap command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-findAndTap",
+          "markdownDescription": "Enables the findAndTap command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the findAndTap command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-findAndTap",
+          "markdownDescription": "Denies the findAndTap command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the findNodeInfo command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-findNodeInfo",
+          "markdownDescription": "Enables the findNodeInfo command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the findNodeInfo command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-findNodeInfo",
+          "markdownDescription": "Denies the findNodeInfo command without any pre-configured scope."
         },
         {
           "description": "Enables the find_and_tap command without any pre-configured scope.",
@@ -365,6 +509,78 @@
           "type": "string",
           "const": "deny-find-node-info",
           "markdownDescription": "Denies the find_node_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the getDeviceInfo command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-getDeviceInfo",
+          "markdownDescription": "Enables the getDeviceInfo command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the getDeviceInfo command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-getDeviceInfo",
+          "markdownDescription": "Denies the getDeviceInfo command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the getInstalledApps command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-getInstalledApps",
+          "markdownDescription": "Enables the getInstalledApps command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the getInstalledApps command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-getInstalledApps",
+          "markdownDescription": "Denies the getInstalledApps command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the getNotifications command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-getNotifications",
+          "markdownDescription": "Enables the getNotifications command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the getNotifications command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-getNotifications",
+          "markdownDescription": "Denies the getNotifications command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the getSafFolderStatus command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-getSafFolderStatus",
+          "markdownDescription": "Enables the getSafFolderStatus command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the getSafFolderStatus command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-getSafFolderStatus",
+          "markdownDescription": "Denies the getSafFolderStatus command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the getScreenInfo command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-getScreenInfo",
+          "markdownDescription": "Enables the getScreenInfo command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the getScreenInfo command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-getScreenInfo",
+          "markdownDescription": "Denies the getScreenInfo command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the getSessionStatus command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-getSessionStatus",
+          "markdownDescription": "Enables the getSessionStatus command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the getSessionStatus command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-getSessionStatus",
+          "markdownDescription": "Denies the getSessionStatus command without any pre-configured scope."
         },
         {
           "description": "Enables the get_device_info command without any pre-configured scope.",
@@ -403,6 +619,18 @@
           "markdownDescription": "Denies the get_notifications command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_saf_folder_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-saf-folder-status",
+          "markdownDescription": "Enables the get_saf_folder_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_saf_folder_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-saf-folder-status",
+          "markdownDescription": "Denies the get_saf_folder_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_screen_info command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-screen-info",
@@ -427,6 +655,18 @@
           "markdownDescription": "Denies the get_session_status command without any pre-configured scope."
         },
         {
+          "description": "Enables the inputText command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-inputText",
+          "markdownDescription": "Enables the inputText command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the inputText command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-inputText",
+          "markdownDescription": "Denies the inputText command without any pre-configured scope."
+        },
+        {
           "description": "Enables the input_text command without any pre-configured scope.",
           "type": "string",
           "const": "allow-input-text",
@@ -437,6 +677,30 @@
           "type": "string",
           "const": "deny-input-text",
           "markdownDescription": "Denies the input_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the listModels command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-listModels",
+          "markdownDescription": "Enables the listModels command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the listModels command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-listModels",
+          "markdownDescription": "Denies the listModels command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the listSafModels command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-listSafModels",
+          "markdownDescription": "Enables the listSafModels command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the listSafModels command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-listSafModels",
+          "markdownDescription": "Denies the listSafModels command without any pre-configured scope."
         },
         {
           "description": "Enables the list_models command without any pre-configured scope.",
@@ -451,6 +715,30 @@
           "markdownDescription": "Denies the list_models command without any pre-configured scope."
         },
         {
+          "description": "Enables the list_saf_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-saf-models",
+          "markdownDescription": "Enables the list_saf_models command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_saf_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-saf-models",
+          "markdownDescription": "Denies the list_saf_models command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the longPress command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-longPress",
+          "markdownDescription": "Enables the longPress command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the longPress command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-longPress",
+          "markdownDescription": "Denies the longPress command without any pre-configured scope."
+        },
+        {
           "description": "Enables the long_press command without any pre-configured scope.",
           "type": "string",
           "const": "allow-long-press",
@@ -463,6 +751,18 @@
           "markdownDescription": "Denies the long_press command without any pre-configured scope."
         },
         {
+          "description": "Enables the makeCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-makeCall",
+          "markdownDescription": "Enables the makeCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the makeCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-makeCall",
+          "markdownDescription": "Denies the makeCall command without any pre-configured scope."
+        },
+        {
           "description": "Enables the make_call command without any pre-configured scope.",
           "type": "string",
           "const": "allow-make-call",
@@ -473,6 +773,30 @@
           "type": "string",
           "const": "deny-make-call",
           "markdownDescription": "Denies the make_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the openApp command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-openApp",
+          "markdownDescription": "Enables the openApp command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the openApp command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-openApp",
+          "markdownDescription": "Denies the openApp command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the openPermissionSettings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-openPermissionSettings",
+          "markdownDescription": "Enables the openPermissionSettings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the openPermissionSettings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-openPermissionSettings",
+          "markdownDescription": "Denies the openPermissionSettings command without any pre-configured scope."
         },
         {
           "description": "Enables the open_app command without any pre-configured scope.",
@@ -499,6 +823,78 @@
           "markdownDescription": "Denies the open_permission_settings command without any pre-configured scope."
         },
         {
+          "description": "Enables the pickModelFile command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pickModelFile",
+          "markdownDescription": "Enables the pickModelFile command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pickModelFile command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pickModelFile",
+          "markdownDescription": "Denies the pickModelFile command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pickSafFolder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pickSafFolder",
+          "markdownDescription": "Enables the pickSafFolder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pickSafFolder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pickSafFolder",
+          "markdownDescription": "Denies the pickSafFolder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pickSaveLocation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pickSaveLocation",
+          "markdownDescription": "Enables the pickSaveLocation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pickSaveLocation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pickSaveLocation",
+          "markdownDescription": "Denies the pickSaveLocation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pick_model_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-model-file",
+          "markdownDescription": "Enables the pick_model_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_model_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-model-file",
+          "markdownDescription": "Denies the pick_model_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pick_saf_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-saf-folder",
+          "markdownDescription": "Enables the pick_saf_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_saf_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-saf-folder",
+          "markdownDescription": "Denies the pick_saf_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pick_save_location command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-save-location",
+          "markdownDescription": "Enables the pick_save_location command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_save_location command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-save-location",
+          "markdownDescription": "Denies the pick_save_location command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ping command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ping",
@@ -511,6 +907,42 @@
           "markdownDescription": "Denies the ping command without any pre-configured scope."
         },
         {
+          "description": "Enables the safDownloadModel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-safDownloadModel",
+          "markdownDescription": "Enables the safDownloadModel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the safDownloadModel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-safDownloadModel",
+          "markdownDescription": "Denies the safDownloadModel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the saf_download_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-saf-download-model",
+          "markdownDescription": "Enables the saf_download_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the saf_download_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-saf-download-model",
+          "markdownDescription": "Denies the saf_download_model command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the scrollToFind command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-scrollToFind",
+          "markdownDescription": "Enables the scrollToFind command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the scrollToFind command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-scrollToFind",
+          "markdownDescription": "Denies the scrollToFind command without any pre-configured scope."
+        },
+        {
           "description": "Enables the scroll_to_find command without any pre-configured scope.",
           "type": "string",
           "const": "allow-scroll-to-find",
@@ -521,6 +953,30 @@
           "type": "string",
           "const": "deny-scroll-to-find",
           "markdownDescription": "Denies the scroll_to_find command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sendChatMessage command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sendChatMessage",
+          "markdownDescription": "Enables the sendChatMessage command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sendChatMessage command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sendChatMessage",
+          "markdownDescription": "Denies the sendChatMessage command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sendMessage command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sendMessage",
+          "markdownDescription": "Enables the sendMessage command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sendMessage command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sendMessage",
+          "markdownDescription": "Denies the sendMessage command without any pre-configured scope."
         },
         {
           "description": "Enables the send_chat_message command without any pre-configured scope.",
@@ -547,6 +1003,30 @@
           "markdownDescription": "Denies the send_message command without any pre-configured scope."
         },
         {
+          "description": "Enables the startLiveActivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-startLiveActivity",
+          "markdownDescription": "Enables the startLiveActivity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the startLiveActivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-startLiveActivity",
+          "markdownDescription": "Denies the startLiveActivity command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the startSession command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-startSession",
+          "markdownDescription": "Enables the startSession command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the startSession command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-startSession",
+          "markdownDescription": "Denies the startSession command without any pre-configured scope."
+        },
+        {
           "description": "Enables the start_live_activity command without any pre-configured scope.",
           "type": "string",
           "const": "allow-start-live-activity",
@@ -569,6 +1049,30 @@
           "type": "string",
           "const": "deny-start-session",
           "markdownDescription": "Denies the start_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stopLiveActivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stopLiveActivity",
+          "markdownDescription": "Enables the stopLiveActivity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stopLiveActivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stopLiveActivity",
+          "markdownDescription": "Denies the stopLiveActivity command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stopSession command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stopSession",
+          "markdownDescription": "Enables the stopSession command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stopSession command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stopSession",
+          "markdownDescription": "Denies the stopSession command without any pre-configured scope."
         },
         {
           "description": "Enables the stop_live_activity command without any pre-configured scope.",
@@ -607,6 +1111,18 @@
           "markdownDescription": "Denies the swipe command without any pre-configured scope."
         },
         {
+          "description": "Enables the systemKey command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-systemKey",
+          "markdownDescription": "Enables the systemKey command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the systemKey command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-systemKey",
+          "markdownDescription": "Denies the systemKey command without any pre-configured scope."
+        },
+        {
           "description": "Enables the system_key command without any pre-configured scope.",
           "type": "string",
           "const": "allow-system-key",
@@ -617,6 +1133,18 @@
           "type": "string",
           "const": "deny-system-key",
           "markdownDescription": "Denies the system_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the takeScreenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-takeScreenshot",
+          "markdownDescription": "Enables the takeScreenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the takeScreenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-takeScreenshot",
+          "markdownDescription": "Denies the takeScreenshot command without any pre-configured scope."
         },
         {
           "description": "Enables the take_screenshot command without any pre-configured scope.",
@@ -643,6 +1171,18 @@
           "markdownDescription": "Denies the tap command without any pre-configured scope."
         },
         {
+          "description": "Enables the tapNode command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tapNode",
+          "markdownDescription": "Enables the tapNode command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tapNode command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tapNode",
+          "markdownDescription": "Denies the tapNode command without any pre-configured scope."
+        },
+        {
           "description": "Enables the tap_node command without any pre-configured scope.",
           "type": "string",
           "const": "allow-tap-node",
@@ -653,6 +1193,18 @@
           "type": "string",
           "const": "deny-tap-node",
           "markdownDescription": "Denies the tap_node command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the updateLiveActivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-updateLiveActivity",
+          "markdownDescription": "Enables the updateLiveActivity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the updateLiveActivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-updateLiveActivity",
+          "markdownDescription": "Denies the updateLiveActivity command without any pre-configured scope."
         },
         {
           "description": "Enables the update_live_activity command without any pre-configured scope.",

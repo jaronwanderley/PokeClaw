@@ -265,6 +265,123 @@ object ModelManager {
     }
 
     // ------------------------------------------------------------------
+    // Download from arbitrary URL
+    // ------------------------------------------------------------------
+
+    /**
+     * Download a model file from an arbitrary URL to a specified directory.
+     * Unlike downloadModel() which uses the static catalog, this accepts any URL.
+     *
+     * Must be called from a background thread.
+     */
+    fun downloadFromUrl(
+        url: String,
+        saveDir: File,
+        callback: DownloadCallback
+    ) {
+        // Extract filename from URL
+        val fileName = extractFileNameFromUrl(url)
+        Log.i(TAG, "downloadFromUrl: url='$url', saveDir='${saveDir.absolutePath}', fileName='$fileName'")
+
+        // Ensure save directory exists
+        if (!saveDir.exists()) saveDir.mkdirs()
+
+        val targetFile = File(saveDir, fileName)
+        val tempFile = File(saveDir, "$fileName.downloading")
+
+        try {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
+                .build()
+
+            // Support resume from partial download
+            val existingBytes = if (tempFile.exists()) tempFile.length() else 0L
+            val requestBuilder = Request.Builder().url(url)
+            if (existingBytes > 0) {
+                requestBuilder.addHeader("Range", "bytes=$existingBytes-")
+                Log.i(TAG, "downloadFromUrl: resuming from byte $existingBytes")
+            }
+
+            val response = client.newCall(requestBuilder.build()).execute()
+
+            if (!response.isSuccessful && response.code != 206) {
+                callback.onError("Download failed: HTTP ${response.code}")
+                return
+            }
+
+            val isResumedResponse = existingBytes > 0 && response.code == 206
+            if (existingBytes > 0 && !isResumedResponse) {
+                Log.w(TAG, "downloadFromUrl: server ignored Range request; restarting from scratch")
+                tempFile.delete()
+            }
+
+            val totalBytes = if (isResumedResponse) {
+                val contentRange = response.header("Content-Range")
+                contentRange?.substringAfterLast("/")?.toLongOrNull() ?: 0L
+            } else {
+                response.body?.contentLength() ?: 0L
+            }
+
+            val body = response.body ?: run {
+                callback.onError("Empty response body")
+                return
+            }
+
+            val startingBytes = if (isResumedResponse) existingBytes else 0L
+            val outputStream = FileOutputStream(tempFile, isResumedResponse)
+            val buffer = ByteArray(8192)
+            var downloadedBytes = startingBytes
+            var lastReportTime = System.currentTimeMillis()
+            var lastReportedBytes = startingBytes
+
+            body.byteStream().use { input ->
+                outputStream.use { output ->
+                    while (true) {
+                        val bytesRead = input.read(buffer)
+                        if (bytesRead == -1) break
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        val now = System.currentTimeMillis()
+                        if (now - lastReportTime >= 200) {
+                            val elapsed = (now - lastReportTime) / 1000.0
+                            val speed = ((downloadedBytes - lastReportedBytes) / elapsed).toLong()
+                            callback.onProgress(downloadedBytes, totalBytes, speed)
+                            lastReportTime = now
+                            lastReportedBytes = downloadedBytes
+                        }
+                    }
+                }
+            }
+
+            // Rename temp to final
+            if (targetFile.exists()) targetFile.delete()
+            if (!tempFile.renameTo(targetFile)) {
+                callback.onError("Download finished but could not move the model into place")
+                return
+            }
+
+            Log.i(TAG, "downloadFromUrl: complete — ${targetFile.absolutePath} (${targetFile.length()} bytes)")
+            callback.onComplete(targetFile.absolutePath)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "downloadFromUrl: failed — ${e.message}", e)
+            callback.onError("Download failed: ${e.message}")
+        }
+    }
+
+    private fun extractFileNameFromUrl(url: String): String {
+        // Try to get the last path segment before query string
+        val path = url.split("?").firstOrNull() ?: url
+        val segment = path.substringAfterLast("/")
+        if (segment.contains(".") && segment.isNotEmpty()) {
+            return java.net.URLDecoder.decode(segment, "UTF-8")
+        }
+        return "model.litertlm"
+    }
+
+    // ------------------------------------------------------------------
     // Private helpers
     // ------------------------------------------------------------------
 

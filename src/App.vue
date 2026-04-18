@@ -60,6 +60,7 @@ function handleStartTask(text: string) {
         <div class="tb-t">Poke<b>Claw</b></div>
       </div>
       <div class="tb-right">
+        <div>v1.0.1</div>
         <div v-if="sessionStatus === 'ready'" class="tb-b" :class="{ 'tb-gpu': preferGpu, 'tb-cpu': !preferGpu }">
           {{ preferGpu ? 'GPU' : 'CPU' }}
         </div>
@@ -144,8 +145,6 @@ function handleStartTask(text: string) {
   flex-direction: column;
   height: 100%;
   width: 100%;
-  max-width: 390px;
-  margin: 0 auto;
 }
 
 /* Title bar */
@@ -155,6 +154,7 @@ function handleStartTask(text: string) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
   background: var(--surface);
   border-bottom: 1px solid var(--div);
 }
@@ -280,6 +280,7 @@ function handleStartTask(text: string) {
   flex-shrink: 0;
   background: var(--surface);
   border-top: 1px solid var(--div);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Streaming message */
