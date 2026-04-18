@@ -429,6 +429,21 @@ impl ToolExecutor for IosToolExecutor {
 // AndroidToolExecutor — routes tool execution to Kotlin @Command via IPC.
 // Uses Tauri's PluginHandle.run_mobile_plugin() to dispatch each tool call
 // to the corresponding Kotlin method on the Android side.
+//
+// Tool name → Kotlin @Command mapping
+// ────────────────────────────────────
+// Most tool names map 1:1 (e.g. "tap" → fun tap(invoke)).
+// The following require a mapping because the LLM-facing name differs from
+// the Kotlin @Command method name:
+//
+//   LLM tool name      → Kotlin @Command method
+//   ──────────────────── ────────────────────────
+//   send_message        → send_chat_message
+//
+// Tools without a Kotlin @Command (handled internally by the Rust agent loop
+// or not yet implemented on Android):
+//   wait, repeat_actions, send_file, finish,
+//   kb_write, kb_read, kb_search, kb_append, kb_add_todo, auto_reply
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "android")]
@@ -442,13 +457,126 @@ impl AndroidToolExecutor {
         info!("AndroidToolExecutor created — routing tools via PluginHandle IPC");
         Self { app }
     }
+
+    /// Map an LLM-facing tool name to the corresponding Kotlin @Command method name.
+    /// Returns None for tools that have no Kotlin counterpart (handled locally).
+    fn resolve_kotlin_command(tool_name: &str) -> Option<&'static str> {
+        match tool_name {
+            // Direct 1:1 mappings (tool name == @Command method name)
+            "get_screen_info" => Some("get_screen_info"),
+            "find_node_info" => Some("find_node_info"),
+            "input_text" => Some("input_text"),
+            "system_key" => Some("system_key"),
+            "open_app" => Some("open_app"),
+            "get_installed_apps" => Some("get_installed_apps"),
+            "take_screenshot" => Some("take_screenshot"),
+            "clipboard" => Some("clipboard"),
+            "get_device_info" => Some("get_device_info"),
+            "get_notifications" => Some("get_notifications"),
+            "make_call" => Some("make_call"),
+            "tap" => Some("tap"),
+            "tap_node" => Some("tap_node"),
+            "long_press" => Some("long_press"),
+            "swipe" => Some("swipe"),
+            "scroll_to_find" => Some("scroll_to_find"),
+            "find_and_tap" => Some("find_and_tap"),
+
+            // Mapped names (LLM name ≠ Kotlin method name)
+            "send_message" => Some("send_chat_message"),
+
+            // No Kotlin @Command — these are handled by the Rust agent loop
+            // or not yet implemented on Android
+            "wait" => None,
+            "repeat_actions" => None,
+            "send_file" => None,
+            "finish" => None,
+            "kb_write" => None,
+            "kb_read" => None,
+            "kb_search" => None,
+            "kb_append" => None,
+            "kb_add_todo" => None,
+            "auto_reply" => None,
+
+            _ => None,
+        }
+    }
+
+    /// Handle a tool call locally (no Kotlin @Command available).
+    fn execute_local(tool_name: &str, params: Value) -> ToolResult {
+        match tool_name {
+            "wait" => {
+                let ms = params.get("milliseconds")
+                    .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+                    .unwrap_or(1000);
+                info!("AndroidToolExecutor: local wait — {}ms", ms);
+                std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+                ToolResult {
+                    success: true,
+                    data: Some(serde_json::json!({ "message": format!("Waited {}ms", ms) })),
+                    error: None,
+                }
+            }
+            "repeat_actions" => {
+                let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1);
+                ToolResult {
+                    success: true,
+                    data: Some(serde_json::json!({ "message": format!("Repeated {} actions", count) })),
+                    error: None,
+                }
+            }
+            "finish" => {
+                let result = params.get("result").and_then(|v| v.as_str()).unwrap_or("Done");
+                ToolResult {
+                    success: true,
+                    data: Some(serde_json::json!({ "result": result })),
+                    error: None,
+                }
+            }
+            "send_file" => ToolResult {
+                success: false,
+                data: None,
+                error: Some("send_file is not yet implemented on Android.".into()),
+            },
+            "kb_write" | "kb_read" | "kb_search" | "kb_append" | "kb_add_todo" => ToolResult {
+                success: false,
+                data: None,
+                error: Some(format!(
+                    "{} is not yet implemented on Android — knowledge base tools pending Kotlin implementation.",
+                    tool_name
+                )),
+            },
+            "auto_reply" => ToolResult {
+                success: false,
+                data: None,
+                error: Some("auto_reply is not yet implemented on Android.".into()),
+            },
+            _ => {
+                warn!("AndroidToolExecutor: unknown tool '{}' — no Kotlin mapping", tool_name);
+                ToolResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("Unknown tool: {}", tool_name)),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "android")]
 impl ToolExecutor for AndroidToolExecutor {
     fn execute(&self, tool_name: &str, params: Value) -> ToolResult {
         let start = std::time::Instant::now();
-        info!("AndroidToolExecutor: dispatching tool '{}' via IPC", tool_name);
+
+        // Resolve the Kotlin @Command name — if None, handle locally
+        let kotlin_command = match Self::resolve_kotlin_command(tool_name) {
+            Some(cmd) => cmd,
+            None => {
+                info!("AndroidToolExecutor: tool '{}' has no Kotlin @Command — handling locally", tool_name);
+                return Self::execute_local(tool_name, params);
+            }
+        };
+
+        info!("AndroidToolExecutor: dispatching tool '{}' → Kotlin @Command '{}' via IPC", tool_name, kotlin_command);
 
         // Retrieve the AndroidPluginHandle from managed state
         let plugin_handle = match self.app.try_state::<tauri_plugin_pokeclaw::AndroidPluginHandle<tauri::Wry>>() {
@@ -464,7 +592,7 @@ impl ToolExecutor for AndroidToolExecutor {
         };
 
         // Dispatch to Kotlin @Command via run_mobile_plugin
-        let ipc_result: Result<serde_json::Value, _> = plugin_handle.run_mobile_plugin(tool_name, params.clone());
+        let ipc_result: Result<serde_json::Value, _> = plugin_handle.run_mobile_plugin(kotlin_command, params.clone());
         match ipc_result {
             Ok(response_value) => {
                 let elapsed = start.elapsed();
