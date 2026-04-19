@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useModel } from '../composables/useModel'
 import { useAgent } from '../composables/useAgent'
 
-defineProps<{
+const props = defineProps<{
   visible: boolean
 }>()
 
@@ -12,13 +12,14 @@ const emit = defineEmits<{
   backendChanged: []
 }>()
 
-const { preferGpu, selectedModelPath, stopSession, getSessionStatus } = useModel()
+const { preferGpu, selectedModelPath, stopSession, getSessionStatus, currentProvider, setProvider } = useModel()
 const { testAgentRound, setApiKey, lastRoundResult, isRunning, error: agentError } = useAgent()
 
 const apiKeyInput = ref('')
 const agentPrompt = ref('Tap the Messages app')
 const apiKeySaved = ref(false)
 const agentResultExpanded = ref(false)
+const sessionActive = ref(false)
 
 async function handleStopSession() {
   await stopSession()
@@ -44,6 +45,24 @@ async function handleTestAgentRound() {
   await testAgentRound(agentPrompt.value.trim())
   agentResultExpanded.value = true
 }
+
+async function handleProviderChange(type: 'openai' | 'anthropic' | 'local') {
+  await setProvider(type)
+}
+
+async function checkSessionActive() {
+  try {
+    const status = await getSessionStatus()
+    sessionActive.value = status.state === 'ready'
+  } catch {
+    sessionActive.value = false
+  }
+}
+
+// Check session status when panel becomes visible
+watch(() => props.visible, (newVal) => {
+  if (newVal) checkSessionActive()
+})
 </script>
 
 <template>
@@ -72,6 +91,26 @@ async function handleTestAgentRound() {
           <span class="toggle-label">{{ preferGpu ? 'GPU' : 'CPU' }}</span>
           <span class="toggle-indicator"></span>
         </button>
+      </div>
+
+      <!-- LLM Provider selector -->
+      <div class="setting-row">
+        <div class="setting-label">
+          <span class="setting-name">LLM Provider</span>
+          <span class="setting-desc">Choose provider for agent tasks</span>
+        </div>
+        <div class="provider-select">
+          <button
+            v-for="p in (['openai', 'anthropic', 'local'] as const)"
+            :key="p"
+            class="provider-btn"
+            :class="{ active: currentProvider === p }"
+            @click="handleProviderChange(p)"
+          >
+            {{ p === 'openai' ? 'OpenAI' : p === 'anthropic' ? 'Anthropic' : 'Local' }}
+            <span v-if="p === 'local' && sessionActive" class="provider-check">✓</span>
+          </button>
+        </div>
       </div>
 
       <!-- Session info -->
@@ -287,6 +326,49 @@ async function handleTestAgentRound() {
 
 .toggle-btn:not(.active) .toggle-indicator {
   transform: translateX(-32px);
+}
+
+/* Provider selector */
+.provider-select {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.provider-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--t2);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.provider-btn:hover {
+  border-color: var(--accent);
+  color: var(--t1);
+}
+
+.provider-btn.active {
+  background: var(--accent);
+  color: #151211;
+  border-color: var(--accent);
+}
+
+.provider-check {
+  color: #2a7a2a;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.provider-btn.active .provider-check {
+  color: #151211;
 }
 
 .session-info {

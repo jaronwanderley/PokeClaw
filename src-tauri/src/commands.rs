@@ -372,6 +372,19 @@ pub async fn startTask(
 
     info!("start_task: provider={:?}, model={}", provider_type, model_name);
 
+    // ── Session pre-check for Local provider ─────────────────────
+    if provider_type == LlmProviderType::Local {
+        let session_active = {
+            let inf_state = _inference_state.active_session.lock().map_err(|e| e.to_string())?;
+            inf_state.is_some()
+        };
+        if !session_active {
+            warn!("start_task: local provider rejected — no active session");
+            return Err("No local inference session active. Start a session first.".to_string());
+        }
+        info!("start_task: local provider, session active=true");
+    }
+
     // ── Insert task record for persistence ─────────────────────────
     let task_db_id = {
         let db = state.db.lock().map_err(|e| format!("DB lock error: {}", e))?;

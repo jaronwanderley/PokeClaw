@@ -41,6 +41,9 @@ const downloadProgress = ref<DownloadProgress>({
 const selectedModelPath = ref<string | null>(null)
 const preferGpu = ref(true)
 
+// Provider auto-switch state
+const currentProvider = ref<'openai' | 'anthropic' | 'local'>('openai')
+
 // Shared SAF state
 const hasSafPermission = ref(false)
 const safFolderName = ref('')
@@ -286,6 +289,16 @@ export function useModel() {
       const sessionId = result.session_id ?? result.sessionId ?? ''
       const backend = result.backend ?? 'unknown'
       console.log('[useModel] startSession: session active —', sessionId, backend)
+
+      // Auto-switch provider to local when session starts
+      try {
+        await invoke('setLlmProviderType', { providerType: 'local' })
+        currentProvider.value = 'local'
+        console.log('[useModel] startSession: provider auto-switched to local')
+      } catch (err) {
+        console.warn('[useModel] startSession: failed to auto-switch provider to local:', err)
+      }
+
       return { sessionId, backend }
     } catch (err) {
       console.error('[useModel] startSession failed:', err)
@@ -303,6 +316,28 @@ export function useModel() {
       console.error('[useModel] stopSession failed:', err)
     }
     selectedModelPath.value = null
+
+    // Auto-switch provider back to openai when session stops
+    try {
+      await invoke('setLlmProviderType', { providerType: 'openai' })
+      currentProvider.value = 'openai'
+      console.log('[useModel] stopSession: provider auto-switched to openai')
+    } catch (err) {
+      console.warn('[useModel] stopSession: failed to auto-switch provider to openai:', err)
+    }
+  }
+
+  /**
+   * Explicitly set the LLM provider type. Updates both backend and local ref.
+   */
+  async function setProvider(type: 'openai' | 'anthropic' | 'local'): Promise<void> {
+    try {
+      await invoke('setLlmProviderType', { providerType: type })
+      currentProvider.value = type
+      console.log('[useModel] setProvider: switched to', type)
+    } catch (err) {
+      console.error('[useModel] setProvider failed:', err)
+    }
   }
 
   async function getSessionStatus(): Promise<{
@@ -332,12 +367,14 @@ export function useModel() {
     downloadProgress,
     selectedModelPath,
     preferGpu,
+    currentProvider,
     fetchModels,
     pickModelFile,
     downloadModel,
     downloadFromUrl,
     startSession,
     stopSession,
+    setProvider,
     getSessionStatus,
     getSafFolderStatus,
     pickSafFolder,

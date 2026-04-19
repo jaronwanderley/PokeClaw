@@ -12,7 +12,7 @@ import PermissionPanel from './components/PermissionPanel.vue'
 import TaskPanel from './components/TaskPanel.vue'
 
 const { messages, streamingText, isStreaming, sessionStatus, sendMessage, setSessionStatus } = useChat()
-const { preferGpu } = useModel()
+const { preferGpu, stopSession } = useModel()
 const { screenTree, isLoading: isScreenLoading, error: screenError, fetchScreenInfo } = useAccessibility()
 const { startTask, taskStatus } = useTask()
 const chatRef = ref<HTMLElement | null>(null)
@@ -49,6 +49,11 @@ function handleStartTask(text: string) {
   showTaskPanel.value = true
   startTask(text)
 }
+
+async function goToModelPicker() {
+  await stopSession()
+  setSessionStatus('idle')
+}
 onMounted(() => {
   console.log('[App] Mounted. sessionStatus:', sessionStatus.value, 'isAndroid:', isAndroid)
 })
@@ -70,6 +75,11 @@ onMounted(() => {
         </div>
         <div v-else-if="sessionStatus === 'loading'" class="tb-b tb-loading">Loading...</div>
         <div v-else class="tb-b tb-idle">No Model</div>
+        <button v-if="sessionStatus === 'ready'" class="tb-nav-btn" @click="goToModelPicker" title="Change model">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h18v8zM6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+          </svg>
+        </button>
         <button class="tb-gear" @click="showSettings = !showSettings">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="#7A6E64">
             <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94L14.4 2.81a.47.47 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41L9.25 5.35c-.59.24-1.13.57-1.62.94L5.24 5.33a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.61 3.61 0 0112 15.6z" />
@@ -248,6 +258,28 @@ onMounted(() => {
 
 .tb-gear:hover {
   background: var(--ai);
+}
+
+/* Model picker navigation button */
+.tb-nav-btn {
+  background: none;
+  border: 1px solid var(--aib);
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--t2);
+  transition: all 0.15s;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tb-nav-btn:hover {
+  background: var(--ai);
+  color: var(--t1);
 }
 
 /* Model area (fills space when idle) */
