@@ -23,6 +23,7 @@ Priority: `P0` = blocks users, fix now. `P1` = next up. `P2` = when we get to it
 - [x] ~~**P1** In-chat task auto-return~~ — done 2026-04-08
 - [x] ~~**P2** Monitor stays in app~~ — done 2026-04-08, removed GLOBAL_ACTION_HOME
 - [ ] **P2** Unified task registry: monitor + agent tasks tracked in same system (top bar, floating button, etc.)
+- [ ] **P1** Session management: multiple conversation sessions with different system prompts, ability to delete and favorite sessions (R032, R033, R034)
 - [ ] **P3** Rename chat session (H6): pencil icon in sidebar → InputDialog → update title in DB + markdown
 - [ ] **P3** Floating button: use PokeClaw icon instead of "AI" text
 - [ ] **P3** ChatViewModel extraction: move business logic out of ComposeChatActivity god class

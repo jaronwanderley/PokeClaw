@@ -790,12 +790,47 @@ mod android_commands {
     }
 
     #[tauri::command]
-    pub fn sendMessage<R: Runtime>(
+    pub async fn sendMessage<R: Runtime>(
         app: AppHandle<R>,
         state: State<'_, InferenceState>,
         message: String,
+        on_event: tauri::ipc::Channel<StreamEvent>,
     ) -> Result<String, String> {
-        session_impl::do_send_message(&app, &state, message)
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        let plugin = handle.0.clone();
+
+        // Run blocking Kotlin IPC on a dedicated thread
+        let result = tokio::task::spawn_blocking(move || {
+            log::info!("send_message (Android/spawn_blocking): invoking Kotlin sendMessage — message_len={}", message.len());
+
+            let args = serde_json::json!({
+                "message": message,
+            });
+
+            let result: serde_json::Value = plugin.run_mobile_plugin("sendMessage", args)
+                .map_err(|e| format!("Kotlin sendMessage failed: {}", e))?;
+
+            let response = result.get("response")
+                .and_then(|v: &serde_json::Value| v.as_str())
+                .ok_or_else(|| "Kotlin sendMessage returned no response string".to_string())?;
+
+            Ok::<String, String>(response.to_string())
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking panicked: {}", e))?;
+
+        // Send result through the streaming channel (must be outside spawn_blocking)
+        match &result {
+            Ok(text) => {
+                let _ = on_event.send(StreamEvent::TokenBatch { tokens: text.clone(), batch_index: 0 });
+                let _ = on_event.send(StreamEvent::Complete { full_text: text.clone(), token_count: 0 });
+            }
+            Err(e) => {
+                let _ = on_event.send(StreamEvent::Error { message: e.clone() });
+            }
+        }
+
+        result
     }
 
     #[tauri::command]
@@ -806,6 +841,127 @@ mod android_commands {
     #[tauri::command]
     pub fn checkAppPermissions<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
         session_impl::do_check_app_permissions(&app)
+    }
+
+    #[tauri::command]
+    pub fn list_models<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("listModels", serde_json::json!({}))
+            .map_err(|e| format!("Kotlin listModels failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub async fn download_model<R: Runtime>(
+        app: AppHandle<R>,
+        model_id: String,
+        on_progress: tauri::ipc::Channel<DownloadEvent>,
+    ) -> Result<(), String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin::<serde_json::Value>(
+            "downloadModel",
+            serde_json::json!({ "modelId": model_id, "onProgress": on_progress })
+        ).map_err(|e| format!("Kotlin downloadModel failed: {}", e))?;
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub fn pick_model_file<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("pickModelFile", serde_json::json!({}))
+            .map_err(|e| format!("Kotlin pickModelFile failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn get_saf_folder_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("getSafFolderStatus", serde_json::json!({}))
+            .map_err(|e| format!("Kotlin getSafFolderStatus failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn pick_saf_folder<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("pickSafFolder", serde_json::json!({}))
+            .map_err(|e| format!("Kotlin pickSafFolder failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn list_saf_models<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("listSafModels", serde_json::json!({}))
+            .map_err(|e| format!("Kotlin listSafModels failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn cache_saf_model<R: Runtime>(app: AppHandle<R>, saf_uri: String) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("cacheSafModel", serde_json::json!({ "safUri": saf_uri }))
+            .map_err(|e| format!("Kotlin cacheSafModel failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn get_screen_info<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("getScreenInfo", serde_json::json!({}))
+            .map_err(|e| format!("Kotlin getScreenInfo failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn take_screenshot<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("takeScreenshot", serde_json::json!({}))
+            .map_err(|e| format!("Kotlin takeScreenshot failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn pick_save_location<R: Runtime>(app: AppHandle<R>, file_name: String) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("pickSaveLocation", serde_json::json!({ "fileName": file_name }))
+            .map_err(|e| format!("Kotlin pickSaveLocation failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn download_to_saf<R: Runtime>(
+        app: AppHandle<R>,
+        url: String,
+        saf_uri: String,
+        on_progress: tauri::ipc::Channel<DownloadEvent>,
+    ) -> Result<(), String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin::<serde_json::Value>(
+            "downloadToSaf",
+            serde_json::json!({ "url": url, "safUri": saf_uri, "onProgress": on_progress })
+        ).map_err(|e| format!("Kotlin downloadToSaf failed: {}", e))?;
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub fn download_to_saf_folder<R: Runtime>(
+        app: AppHandle<R>,
+        url: String,
+        file_name: String,
+        on_progress: tauri::ipc::Channel<DownloadEvent>,
+    ) -> Result<(), String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin::<serde_json::Value>(
+            "downloadToSafFolder",
+            serde_json::json!({ "url": url, "fileName": file_name, "onProgress": on_progress })
+        ).map_err(|e| format!("Kotlin downloadToSafFolder failed: {}", e))?;
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub fn system_key<R: Runtime>(app: AppHandle<R>, action: String) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("systemKey", serde_json::json!({ "action": action }))
+            .map_err(|e| format!("Kotlin systemKey failed: {}", e))
+    }
+
+    #[tauri::command]
+    pub fn clipboard<R: Runtime>(app: AppHandle<R>, action: String, text: Option<String>) -> Result<serde_json::Value, String> {
+        let handle = app.state::<AndroidPluginHandle<R>>();
+        handle.0.run_mobile_plugin("clipboard", serde_json::json!({ "action": action, "text": text }))
+            .map_err(|e| format!("Kotlin clipboard failed: {}", e))
     }
 
     #[tauri::command]
@@ -839,11 +995,47 @@ mod ios_commands {
     }
 
     #[tauri::command]
-    pub fn sendMessage(
+    pub async fn sendMessage(
+        app: AppHandle<R>,
         state: State<'_, InferenceState>,
         message: String,
+        on_event: Option<tauri::ipc::Channel<StreamEvent>>,
     ) -> Result<String, String> {
-        session_impl::do_send_message(&state, message)
+        let handle: AndroidPluginHandle<R> = app.state::<AndroidPluginHandle<R>>().0.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            log::info!("send_message (Android): invoking Kotlin sendMessage — message_len={}", message.len());
+
+            let args = serde_json::json!({
+                "message": message,
+            });
+
+            let result: serde_json::Value = handle.run_mobile_plugin("sendMessage", args)
+                .map_err(|e| format!("Kotlin sendMessage failed: {}", e))?;
+
+            let response = result.get("response")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Kotlin sendMessage returned no response string".to_string())?;
+
+            Ok(response.to_string())
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking panicked: {}", e))?;
+
+        // If frontend passed a channel (streaming mode), send events through it
+        if let Some(channel) = on_event {
+            match &result {
+                Ok(text) => {
+                    let _ = channel.send(StreamEvent::TokenBatch { tokens: text.clone(), batch_index: 0 });
+                    let _ = channel.send(StreamEvent::Complete { full_text: text.clone(), token_count: 0 });
+                }
+                Err(e) => {
+                    let _ = channel.send(StreamEvent::Error { message: e.clone() });
+                }
+            }
+        }
+
+        result
     }
 
     #[tauri::command]
@@ -1295,6 +1487,20 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             android_commands::sendMessage,
             android_commands::getSessionStatus,
             android_commands::checkAppPermissions,
+            android_commands::list_models,
+            android_commands::download_model,
+            android_commands::pick_model_file,
+            android_commands::get_saf_folder_status,
+            android_commands::pick_saf_folder,
+            android_commands::list_saf_models,
+            android_commands::cache_saf_model,
+            android_commands::get_screen_info,
+            android_commands::take_screenshot,
+            android_commands::system_key,
+            android_commands::clipboard,
+            android_commands::pick_save_location,
+            android_commands::download_to_saf,
+            android_commands::download_to_saf_folder,
             android_commands::chat,
         ]);
 

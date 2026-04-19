@@ -64,13 +64,20 @@ object EngineHolder {
 
         Log.i(TAG, "getOrCreate: creating new engine for $modelPath with ${backend.javaClass.simpleName}")
         return try {
+            val startTime = System.currentTimeMillis()
+            Log.i(TAG, "getOrCreate: initializing engine for $modelPath...")
+            
             val engineConfig = EngineConfig(
                 modelPath = modelPath,
                 backend = backend,
-                maxNumTokens = 8192,
-                cacheDir = cacheDir
+                maxNumTokens = 4096,
+                cacheDir = cacheDir,
             )
             val newEngine = Engine(engineConfig).also { it.initialize() }
+            
+            val duration = System.currentTimeMillis() - startTime
+            Log.i(TAG, "getOrCreate: engine initialization complete in ${duration}ms")
+            
             engine = newEngine
             currentModelPath = modelPath
             currentBackendLabel = backendLabel(backend)

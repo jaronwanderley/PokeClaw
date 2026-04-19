@@ -44,6 +44,7 @@ const preferGpu = ref(true)
 // Shared SAF state
 const hasSafPermission = ref(false)
 const safFolderName = ref('')
+const isSessionLoading = ref(false)
 
 const downloadPercent = computed(() => {
   if (downloadProgress.value.totalBytes === 0) return 0
@@ -113,16 +114,25 @@ export function useModel() {
   async function listSafModels(): Promise<void> {
     try {
       const result = await invoke<{ models: any[] }>('plugin:pokeclaw|listSafModels')
-      modelList.value = result.models.map(m => ({
-        id: m.fileName,
-        displayName: m.fileName,
-        url: '',
-        fileName: m.fileName,
-        sizeBytes: m.sizeBytes,
-        minRamGb: 0,
-        isDownloaded: true,
-        localPath: m.safUri,
-      }))
+      console.log('[useModel] listSafModels raw result:', JSON.stringify(result))
+      const models = Array.isArray(result?.models) ? result.models : []
+      modelList.value = models.filter(m => m != null).map(m => {
+        const size = m.sizeBytes ?? 0
+        const sizeGb = size / (1024 * 1024 * 1024)
+        // Estimate minimum RAM as 2x model size, rounded up to nearest GB
+        const minRamGb = Math.ceil(sizeGb * 2)
+        return {
+          id: m.fileName ?? 'unknown',
+          displayName: m.fileName ?? 'Unknown Model',
+          url: '',
+          fileName: m.fileName ?? '',
+          sizeBytes: size,
+          minRamGb,
+          isDownloaded: true,
+          localPath: m.safUri ?? null,
+        }
+      })
+      console.log('[useModel] listSafModels: mapped', modelList.value.length, 'models')
     } catch (err) {
       console.error('[useModel] listSafModels failed:', err)
     }
@@ -267,6 +277,7 @@ export function useModel() {
       return null
     }
 
+    isSessionLoading.value = true
     try {
       const result = await invoke<{ session_id?: string; sessionId?: string; backend?: string }>(
         'plugin:pokeclaw|startSession',
@@ -279,6 +290,8 @@ export function useModel() {
     } catch (err) {
       console.error('[useModel] startSession failed:', err)
       return null
+    } finally {
+      isSessionLoading.value = false
     }
   }
 
@@ -332,5 +345,6 @@ export function useModel() {
     hasSafPermission,
     safFolderName,
     downloadPercent,
+    isSessionLoading,
   }
 }

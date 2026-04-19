@@ -14,6 +14,7 @@ class InferenceSession(
     val modelPath: String,
     val backendLabel: String,
     val sessionId: String,
+    val preferGpu: Boolean,
 ) {
     companion object {
         private const val TAG = "InferenceSession"

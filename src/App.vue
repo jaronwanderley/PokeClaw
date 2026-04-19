@@ -64,7 +64,7 @@ onMounted(() => {
         <div class="tb-t">Poke<b>Claw</b></div>
       </div>
       <div class="tb-right">
-        <div>v1.0.3</div>
+        <div>v1.0.5</div>
         <div v-if="sessionStatus === 'ready'" class="tb-b" :class="{ 'tb-gpu': preferGpu, 'tb-cpu': !preferGpu }">
           {{ preferGpu ? 'GPU' : 'CPU' }}
         </div>

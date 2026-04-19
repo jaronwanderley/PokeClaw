@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useModel } from '../composables/useModel'
 
 const emit = defineEmits<{
@@ -22,10 +22,12 @@ const {
   pickSafFolder,
   hasSafPermission,
   safFolderName,
+  isSessionLoading,
 } = useModel()
 
 const isLoadingModels = ref(false)
 const modelFetchError = ref<string | null>(null)
+const sessionError = ref<string | null>(null)
 
 
 async function checkSafStatus() {
@@ -77,6 +79,10 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1_000).toFixed(0)} KB`
 }
 
+const hasLargeModel = computed(() =>
+  modelList.value.some(m => m.sizeBytes > 2 * 1024 * 1024 * 1024 && m.isDownloaded),
+)
+
 function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec >= 1_000_000_000) return `${(bytesPerSec / 1_000_000_000).toFixed(1)} GB/s`
   if (bytesPerSec >= 1_000_000) return `${(bytesPerSec / 1_000_000).toFixed(0)} MB/s`
@@ -86,8 +92,13 @@ function formatSpeed(bytesPerSec: number): string {
 
 async function handleLoad(modelPath: string) {
   selectedModelPath.value = modelPath
+  sessionError.value = null
   const result = await startSession()
-  if (result) emit('sessionStarted')
+  if (result) {
+    emit('sessionStarted')
+  } else {
+    sessionError.value = 'Falha ao carregar o modelo. Verifique se o arquivo é válido.'
+  }
 }
 
 async function handlePickFile() {
@@ -165,6 +176,12 @@ function toggleUrlPanel() {
     <div class="picker-header">
       <div class="picker-title">Select a Model</div>
       <div class="picker-subtitle">Choose a model to start chatting</div>
+    </div>
+
+    <!-- Session Start Error -->
+    <div v-if="sessionError" class="catalog-error session-error">
+      <span>{{ sessionError }}</span>
+      <button class="error-close-btn" @click="sessionError = null">OK</button>
     </div>
 
     <!-- Android SAF Folder Setup -->
@@ -320,7 +337,7 @@ function toggleUrlPanel() {
           <button
             v-else-if="!model.isDownloaded"
             class="action-btn download-btn"
-            :disabled="isDownloading"
+            :disabled="isDownloading || isSessionLoading"
             @click="handleDownload(model.id)"
           >
             Download
@@ -329,11 +346,25 @@ function toggleUrlPanel() {
           <button
             v-else
             class="action-btn load-btn"
+            :disabled="isSessionLoading"
             @click="handleLoad(model.localPath ?? model.fileName)"
           >
-            Load
+            <template v-if="isSessionLoading && selectedModelPath === (model.localPath ?? model.fileName)">
+              <div class="loading-spinner small white"></div>
+              <span v-if="model.sizeBytes > 2 * 1024 * 1024 * 1024" class="loading-hint">
+                Iniciando (pode levar 1-2 min)...
+              </span>
+            </template>
+            <template v-else>
+              Load
+            </template>
           </button>
         </div>
+      </div>
+
+      <!-- Large Model Warning -->
+      <div v-if="hasLargeModel" class="model-warning">
+        ⚠️ Modelo grande. Se travar, reabra o app para usar modo CPU.
       </div>
     </div>
   </div>
@@ -781,9 +812,43 @@ function toggleUrlPanel() {
   cursor: pointer;
 }
 
+.catalog-error.session-error {
+  margin-bottom: 12px;
+  background: rgba(229, 115, 115, 0.15);
+  border: 1px solid rgba(229, 115, 115, 0.3);
+}
+
+.error-close-btn {
+  background: var(--surface) !important;
+  font-size: 11px !important;
+  padding: 4px 12px !important;
+}
+
+.model-warning {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+}
+
+.loading-hint {
+  font-size: 10px;
+  margin-left: 6px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
 .loading-spinner.small {
   width: 24px;
   height: 24px;
   border-width: 2px;
+}
+
+.loading-spinner.white {
+  border-color: rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
 }
 </style>
