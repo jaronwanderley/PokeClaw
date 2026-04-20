@@ -937,6 +937,174 @@ These tests run on the Tauri WebView-based app (not the legacy Compose app).
 
 ---
 
+## RS. Release Smoke Test (M008 S04)
+
+End-to-end release validation covering full app walkthrough: model selection → inference → chat → agent task → persistence after restart.
+
+### RS1. App launch — idle state
+
+```bash
+# Force clean start
+adb shell am force-stop io.agents.pokeclaw
+sleep 2
+adb shell am start -n io.agents.pokeclaw/.MainActivity
+sleep 5
+PID=$(adb shell pidof io.agents.pokeclaw)
+# Verify no crashes
+adb logcat -d | grep "$PID" | grep -iE "FATAL|crash|ANR"
+# Expected: no results
+# Verify app name visible
+adb shell "uiautomator dump /data/local/tmp/rs1.xml" 2>&1
+adb shell cat //data/local/tmp/rs1.xml | grep -o 'text="PokeClaw"'
+# Expected: text="PokeClaw" present (app title)
+```
+
+- **Pass**: App opens, title shows "PokeClaw", no crashes in logcat
+
+### RS2. Model list shows local models
+
+```bash
+# Verify model list in UI
+adb shell cat //data/local/tmp/rs1.xml | grep -o 'text="gemma-4-E2B-it.litertlm"'
+# Expected: model filename visible
+# Verify logcat shows model list
+adb logcat --pid=$PID -d | grep "listSafModels"
+# Expected: "listSafModels: mapped N models" where N >= 1
+```
+
+- **Pass**: Gemma 4 E2B model appears in list with size info and Load button
+
+### RS3. Start inference session — GPU/CPU badge
+
+```bash
+# Tap Load button on model (adjust coordinates for your device)
+adb shell input tap 897 910
+sleep 8
+# Verify session started in logcat
+adb logcat --pid=$PID -d | grep -iE "startSession|session ready|backend"
+# Expected: "startSession: success" and "backend=GPU" or "backend=CPU"
+# Verify UI shows backend badge
+adb shell "uiautomator dump /data/local/tmp/rs3.xml" 2>&1
+adb shell cat //data/local/tmp/rs3.xml | grep -o 'text="GPU"\|text="CPU"'
+# Expected: GPU or CPU badge visible in toolbar
+```
+
+- **Pass**: Session starts, backend badge (GPU/CPU) appears in toolbar
+
+### RS4. Send chat message — streaming response
+
+```bash
+# Tap input field
+adb shell input tap 427 2099
+sleep 1
+# Type message and send
+adb shell input text "hello"
+sleep 1
+adb shell input keyevent 66
+sleep 10
+# Verify response in logcat
+adb logcat --pid=$PID -d | grep -iE "sendMessage.*done|sendMessage.*OK"
+# Expected: "sendMessage: done, response len=N" where N > 0
+# Verify message saved to DB
+adb logcat --pid=$PID -d | grep "saveChatMessage.*inserted"
+# Expected: "inserted row id=N" for both user and ai messages
+```
+
+- **Pass**: Chat message sent, AI responds with non-empty content, messages persisted to DB
+
+### RS5. Run agent task — end-to-end
+
+```bash
+# Type agent task
+adb shell input tap 427 2099
+sleep 1
+adb shell input text "how%smuch%sbattery%sdo%sI%shave"
+sleep 1
+# Tap "Start agent task" button (coordinates may vary)
+adb shell input tap 891 1469
+sleep 15
+# Verify task ran
+adb logcat --pid=$PID -d | grep -iE "run_agent_loop|persist_task|start_task.*completed"
+# Expected: "run_agent_loop: completed" and "persist_task_completed"
+# Verify TaskPanel shows in UI
+adb shell "uiautomator dump /data/local/tmp/rs5.xml" 2>&1
+adb shell cat //data/local/tmp/rs5.xml | grep -o 'text="R1"\|text="Completed"\|text="Task"'
+# Expected: Task panel visible with round counter
+```
+
+- **Pass**: Agent task executes at least 1 round, TaskPanel shows completion
+
+### RS6. Kill and restart app
+
+```bash
+# Force stop
+adb shell am force-stop io.agents.pokeclaw
+sleep 2
+# Relaunch
+adb shell am start -n io.agents.pokeclaw/.MainActivity
+sleep 8
+PID2=$(adb shell pidof io.agents.pokeclaw)
+echo "New PID: $PID2"
+# Expected: new PID, app restarts cleanly
+# Verify session state reset
+adb logcat --pid=$PID2 -d | grep -iE "startSession|session ready"
+# Expected: no stale session — app starts in idle/model picker state
+```
+
+- **Pass**: App force-stopped and relaunched without crash, session state resets to idle
+
+### RS7. Verify chat persistence after restart
+
+```bash
+# Check loaded messages in logcat
+adb logcat --pid=$PID2 -d | grep "Loaded.*messages from DB"
+# Expected: "Loaded N messages from DB for session YYYY-MM-DD" where N includes messages from RS4
+# Verify loadChatHistory
+adb logcat --pid=$PID2 -d | grep "loadChatHistory.*returning"
+# Expected: "loadChatHistory: returning N messages" where N >= pre-restart count
+```
+
+- **Pass**: Messages from before restart are loaded from SQLite, count is correct
+
+### RS8. No crashes during full walkthrough
+
+```bash
+# Check both sessions for fatal errors
+adb logcat -d | grep -E "FATAL|AndroidRuntime.*pokeclaw"
+# Expected: no results
+# Check for ANR
+adb logcat -d | grep -iE "ANR.*pokeclaw"
+# Expected: no results
+```
+
+- **Pass**: Zero crashes or ANRs during the entire walkthrough
+
+### RS9. App name display — "PokeClaw"
+
+```bash
+# Verify app name in UI title
+adb shell "uiautomator dump /data/local/tmp/rs9.xml" 2>&1
+adb shell cat //data/local/tmp/rs9.xml | grep -o 'text="PokeClaw"'
+# Expected: at least 1 match (app title bar)
+# Verify version visible
+adb shell cat //data/local/tmp/rs9.xml | grep -o 'text="v[0-9.]*"'
+# Expected: version string like "v1.0.5"
+```
+
+- **Pass**: App displays "PokeClaw" as title with version number
+
+### RS10. Database initialization on fresh start
+
+```bash
+# Verify DB init message
+adb logcat --pid=$PID2 -d | grep -iE "database.*init|loadChatHistory"
+# Expected: "loadChatHistory: sessionId=" logged, proving DB is accessible
+```
+
+- **Pass**: Database initializes and chat history loads on app start
+
+---
+
 ## QA Debug Changelog
 
 Format: `[date] [status] [test-id] description`
@@ -1222,6 +1390,23 @@ Format: `[date] [status] [test-id] description`
 [2026-04-19] [PASS]    cargo check (desktop) — 12 pre-existing errors (desktop stubs), no new errors
 [2026-04-19] [PASS]    npx vue-tsc --noEmit — exit 0, no type errors
 [2026-04-19] [NOTE]    OI6     Session pre-check verified via code review (commands.rs) — no debug broadcast receiver in Tauri build
+```
+
+### 2026-04-19 — Release Smoke Test (M008 S04)
+
+Galaxy S25 Ultra (SM-S928B), Android 16, app-universal-debug.apk (v1.0.5).
+
+```
+[2026-04-19] [PASS]    RS1   App launches to idle state, title "PokeClaw" visible, model picker shown, no crashes
+[2026-04-19] [PASS]    RS2   Model list shows gemma-4-E2B-it.litertlm (2.6 GB · 5 GB RAM) with Load button
+[2026-04-19] [PASS]    RS3   Session starts with GPU backend: "startSession: success — session ready (backend=GPU)" in 5.2s, UI shows "GPU" badge
+[2026-04-19] [PASS]    RS4   Chat "hello" → streaming response "Hello! How can I help you today?" (32 chars), saved to DB (row ids 14-15)
+[2026-04-19] [PASS]    RS5   Agent task "how much battery do I have" → agent ran 1 round, TaskPanel shows R1 + Completed, model attempted get_screen_info tool call
+[2026-04-19] [PASS]    RS6   Force-stop + relaunch: new PID 10612, app starts cleanly in idle state (model picker visible)
+[2026-04-19] [PASS]    RS7   Chat persistence verified: "loadChatHistory: returning 15 messages" (was 13 before new chat, now 15 after restart)
+[2026-04-19] [PASS]    RS8   Zero crashes or ANRs during full walkthrough (both PIDs 9826 and 10612 checked)
+[2026-04-19] [PASS]    RS9   App name "PokeClaw" + version "v1.0.5" visible in toolbar
+[2026-04-19] [PASS]    RS10  Database initialization: "loadChatHistory: sessionId='2026-04-19'" logged on restart
 ```
 
 ### Bugs Found During v9 QA
