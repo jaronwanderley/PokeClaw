@@ -23,7 +23,9 @@ Priority: `P0` = blocks users, fix now. `P1` = next up. `P2` = when we get to it
 - [x] ~~**P1** In-chat task auto-return~~ — done 2026-04-08
 - [x] ~~**P2** Monitor stays in app~~ — done 2026-04-08, removed GLOBAL_ACTION_HOME
 - [ ] **P2** Unified task registry: monitor + agent tasks tracked in same system (top bar, floating button, etc.)
-- [ ] **P1** Session management: multiple conversation sessions with different system prompts, ability to delete and favorite sessions (R032, R033, R034)
+- [ ] **P1** Session management: multiple conversation sessions with different system prompts, ability to delete and favorite sessions (R032, R033, R034). Nicole wants this in M008 before moving on.
+- [ ] **P1** System prompt / control prompt per session: user can define how the model should behave, what to answer, customizing each session independently
+- [ ] **P1** Evaluate SAF necessity: app now has storage permission — decide if SAF file picking can be replaced with direct file access for model loading. Simplify the UX if possible.
 - [ ] **P3** Rename chat session (H6): pencil icon in sidebar → InputDialog → update title in DB + markdown
 - [ ] **P3** Floating button: use PokeClaw icon instead of "AI" text
 - [ ] **P3** ChatViewModel extraction: move business logic out of ComposeChatActivity god class
@@ -39,6 +41,7 @@ Priority: `P0` = blocks users, fix now. `P1` = next up. `P2` = when we get to it
 
 ## Ideas / Research
 
+- **P1** "Organizar a casa" milestone (M009 candidate): break pokeclaw plugin into smaller, focused plugins (inference, tools, etc.), optimize agent loop structure, clean up Vue→Rust→Kotlin communication, remove unused methods/dead code, evaluate SAF necessity. Nicole wants basics solid before moving forward.
 - Monetization: two-tier (dev=free open source, consumer=China APK + premium features)
 - YC application showcase
 - Layer 2 NLP Playbooks as "App Cards" like DroidRun

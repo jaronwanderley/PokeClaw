@@ -1060,17 +1060,21 @@ mod desktop_commands {
     use super::*;
 
     #[tauri::command]
-    pub fn startSession(
+    pub fn startSession<R: Runtime>(
+        app: AppHandle<R>,
         state: State<'_, InferenceState>,
         model_path: String,
         prefer_gpu: bool,
     ) -> Result<String, String> {
-        session_impl::do_start_session(&state, model_path, prefer_gpu)
+        session_impl::do_start_session(&app, &state, model_path, prefer_gpu)
     }
 
     #[tauri::command]
-    pub fn stop_session(state: State<'_, InferenceState>) -> Result<(), String> {
-        session_impl::do_stop_session(&state)
+    pub fn stopSession<R: Runtime>(
+        app: AppHandle<R>,
+        state: State<'_, InferenceState>,
+    ) -> Result<(), String> {
+        session_impl::do_stop_session(&app, &state)
     }
 
     /// Desktop streaming send_message. Uses Tauri Channel to stream
@@ -1085,7 +1089,7 @@ mod desktop_commands {
     }
 
     #[tauri::command]
-    pub fn get_session_status(state: State<'_, InferenceState>) -> Result<SessionStatus, String> {
+    pub fn getSessionStatus(state: State<'_, InferenceState>) -> Result<SessionStatus, String> {
         session_impl::do_get_session_status(&state)
     }
 
@@ -1352,46 +1356,46 @@ mod desktop_commands {
 
     /// Desktop stub for pick_model_file. Uses Tauri dialog open instead.
     #[tauri::command]
-    pub fn pickModelFile() -> Result<String, String> {
+    pub fn pick_model_file() -> Result<String, String> {
         log::info!("pick_model_file (desktop): Not available");
         Err("Not available on desktop. Use the file dialog instead.".into())
     }
 
     /// Desktop stub for download_to_saf. Not needed on desktop.
     #[tauri::command]
-    pub fn downloadToSaf(_url: String, _saf_uri: String) -> Result<String, String> {
+    pub fn download_to_saf(_url: String, _saf_uri: String) -> Result<String, String> {
         Err("Not available on desktop. Use download_model_from_url instead.".into())
     }
 
     /// Desktop stub for saf_download_model. Not needed on desktop.
     #[tauri::command]
-    pub fn safDownloadModel(_url: String, _file_name: String) -> Result<String, String> {
+    pub fn saf_download_model(_url: String, _file_name: String) -> Result<String, String> {
         Err("Not available on desktop. Use download_model_from_url instead.".into())
     }
 
     // SAF shared-folder desktop stubs (Android-only)
     #[tauri::command]
-    pub fn pickSafFolder() -> Result<String, String> {
+    pub fn pick_saf_folder() -> Result<String, String> {
         Err("Not available on desktop. Use file dialog instead.".into())
     }
 
     #[tauri::command]
-    pub fn getSafFolderStatus() -> Result<serde_json::Value, String> {
+    pub fn get_saf_folder_status() -> Result<serde_json::Value, String> {
         Ok(serde_json::json!({ "hasPermission": false, "folderUri": null, "folderName": null }))
     }
 
     #[tauri::command]
-    pub fn listSafModels() -> Result<serde_json::Value, String> {
+    pub fn list_saf_models() -> Result<serde_json::Value, String> {
         Ok(serde_json::json!({ "models": [] }))
     }
 
     #[tauri::command]
-    pub fn cacheSafModel(_saf_uri: String) -> Result<String, String> {
+    pub fn cache_saf_model(_saf_uri: String) -> Result<String, String> {
         Err("Not available on desktop.".into())
     }
 
     #[tauri::command]
-    pub async fn downloadToSafFolder(_url: String, _file_name: String) -> Result<String, String> {
+    pub async fn download_to_saf_folder(_url: String, _file_name: String) -> Result<String, String> {
         Err("Not available on desktop. Use download_model_from_url instead.".into())
     }
 
