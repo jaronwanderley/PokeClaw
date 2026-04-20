@@ -29,6 +29,10 @@ use super::llm_provider::{ChatMessage, LlmError, LlmProvider, LlmResponse, ToolC
 // Constants
 // ---------------------------------------------------------------------------
 
+/// Maximum number of tools to include in the prompt.
+/// Local models have limited context windows; exceeding them degrades output quality.
+const MAX_TOOLS_IN_PROMPT: usize = 30;
+
 // ---------------------------------------------------------------------------
 // Compiled regex patterns (ported from Kotlin LocalLlmClient.kt)
 // ---------------------------------------------------------------------------
@@ -158,6 +162,111 @@ fn serialize_messages(messages: &[ChatMessage]) -> String {
         }
     }
     parts.join("\n\n")
+}
+
+// ---------------------------------------------------------------------------
+// Tool definition serialization for local models
+// ---------------------------------------------------------------------------
+
+/// Serialize tool definitions into a text section that the local model can
+/// understand and use to produce tool calls.
+///
+/// The format is designed for Gemma 4 and similar instruction-tuned models
+/// that work best with clear, structured text rather than raw JSON schema.
+///
+/// Output format:
+/// ```text
+/// You have access to the following tools:
+///
+/// 1. tap: Tap on the screen at the specified coordinates.
+///    Parameters: x (integer, required): X coordinate to tap
+///                y (integer, required): Y coordinate to tap
+///
+/// 2. get_device_info: Get device information.
+///    Parameters: (none)
+/// ```
+fn serialize_tool_definitions(tools: &[Value]) -> String {
+    if tools.is_empty() {
+        return String::new();
+    }
+
+    let mut sections: Vec<String> = Vec::new();
+    sections.push("You have access to the following tools:".to_string());
+    sections.push(String::new()); // blank line
+
+    let tools_to_include = if tools.len() > MAX_TOOLS_IN_PROMPT {
+        warn!(
+            "serialize_tool_definitions: {} tools exceeds max {}, truncating",
+            tools.len(),
+            MAX_TOOLS_IN_PROMPT
+        );
+        &tools[..MAX_TOOLS_IN_PROMPT]
+    } else {
+        tools
+    };
+
+    for (i, tool) in tools_to_include.iter().enumerate() {
+        let name = tool
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let description = tool
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let mut entry = format!("{}. {}: {}", i + 1, name, description);
+
+        // Extract parameters from the JSON Schema
+        if let Some(params_schema) = tool.get("parameters") {
+            let properties = params_schema
+                .get("properties")
+                .and_then(|v| v.as_object());
+            let required_keys: std::collections::HashSet<&str> = params_schema
+                .get("required")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if let Some(props) = properties {
+                if !props.is_empty() {
+                    entry.push_str("\n   Parameters:");
+                    let mut param_lines: Vec<String> = Vec::new();
+                    for (param_name, param_schema) in props {
+                        let param_type = param_schema
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("string");
+                        let param_desc = param_schema
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let is_required = required_keys.contains(param_name.as_str());
+                        let req_marker = if is_required { "required" } else { "optional" };
+                        param_lines.push(format!(
+                            "               {} ({}, {}): {}",
+                            param_name, param_type, req_marker, param_desc
+                        ));
+                    }
+                    entry.push_str(&param_lines.join("\n"));
+                }
+            }
+        }
+
+        sections.push(entry);
+    }
+
+    sections.push(String::new()); // trailing blank line
+    sections.push(
+        "To call a tool, output: __{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}__"
+            .to_string(),
+    );
+
+    sections.join("\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -506,15 +615,30 @@ impl LlmProvider for LocalProvider {
     async fn chat(
         &self,
         messages: Vec<ChatMessage>,
-        _tools: Vec<Value>,
+        tools: Vec<Value>,
     ) -> Result<LlmResponse, LlmError> {
         let msg_count = messages.len();
+        let tool_count = tools.len();
         info!(
-            "LocalProvider.chat: messages={}, serializing prompt",
-            msg_count
+            "LocalProvider.chat: messages={}, tools={}",
+            msg_count, tool_count
         );
 
-        let prompt = serialize_messages(&messages);
+        let mut prompt = serialize_messages(&messages);
+
+        // Serialize tool definitions and append to prompt
+        if !tools.is_empty() {
+            let tool_section = serialize_tool_definitions(&tools);
+            if !tool_section.is_empty() {
+                prompt = format!("{}\n\n{}", tool_section, prompt);
+                debug!(
+                    "LocalProvider: appended {} tool definitions to prompt ({} chars total)",
+                    tool_count,
+                    prompt.len()
+                );
+            }
+        }
+
         debug!("LocalProvider: serialized prompt ({} chars)", prompt.len());
 
         // Call the injected closure in a blocking task to avoid blocking the async executor.
@@ -1135,5 +1259,254 @@ mod tests {
         assert!(prompt.contains("User:"));
         assert!(prompt.contains("Assistant:"));
         assert!(prompt.contains("Tool result"));
+    }
+
+    // === Tool definition serialization tests ===
+
+    #[test]
+    fn test_serialize_tool_definitions_empty() {
+        let tools: Vec<Value> = vec![];
+        let result = serialize_tool_definitions(&tools);
+        assert!(result.is_empty(), "Empty tools should produce empty string");
+    }
+
+    #[test]
+    fn test_serialize_tool_definitions_single_tool() {
+        let tools = vec![json!({
+            "name": "tap",
+            "description": "Tap on the screen at the specified coordinates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": { "type": "integer", "description": "X coordinate to tap" },
+                    "y": { "type": "integer", "description": "Y coordinate to tap" }
+                },
+                "required": ["x", "y"]
+            }
+        })];
+
+        let result = serialize_tool_definitions(&tools);
+        assert!(result.contains("You have access to the following tools:"));
+        assert!(result.contains("1. tap: Tap on the screen at the specified coordinates."));
+        assert!(result.contains("x (integer, required): X coordinate to tap"));
+        assert!(result.contains("y (integer, required): Y coordinate to tap"));
+        assert!(result.contains("__"));
+        assert!(result.contains("\"name\": \"tool_name\""));
+    }
+
+    #[test]
+    fn test_serialize_tool_definitions_multiple_tools() {
+        let tools = vec![
+            json!({
+                "name": "tap",
+                "description": "Tap the screen.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "integer", "description": "X coordinate" },
+                        "y": { "type": "integer", "description": "Y coordinate" }
+                    },
+                    "required": ["x", "y"]
+                }
+            }),
+            json!({
+                "name": "get_device_info",
+                "description": "Get device information.",
+                "parameters": { "type": "object", "properties": {}, "required": [] }
+            }),
+        ];
+
+        let result = serialize_tool_definitions(&tools);
+        assert!(result.contains("1. tap: Tap the screen."));
+        assert!(result.contains("2. get_device_info: Get device information."));
+    }
+
+    #[test]
+    fn test_serialize_tool_definitions_no_params() {
+        let tools = vec![json!({
+            "name": "get_screen_info",
+            "description": "Get screen info.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        })];
+
+        let result = serialize_tool_definitions(&tools);
+        assert!(result.contains("get_screen_info: Get screen info."));
+        // Should NOT contain "Parameters:" since there are none
+        assert!(!result.contains("Parameters: x"));
+    }
+
+    #[test]
+    fn test_serialize_tool_definitions_optional_params() {
+        let tools = vec![json!({
+            "name": "wait",
+            "description": "Wait for a time.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "milliseconds": { "type": "integer", "description": "Time to wait in ms" }
+                },
+                "required": ["milliseconds"],
+                "extra_optional": {
+                    "delay_ms": { "type": "integer", "description": "Delay between iterations" }
+                }
+            }
+        })];
+
+        let result = serialize_tool_definitions(&tools);
+        assert!(result.contains("milliseconds (integer, required): Time to wait in ms"));
+    }
+
+    #[test]
+    fn test_serialize_tool_definitions_missing_fields() {
+        // Tool with missing name/description should not panic
+        let tools = vec![json!({
+            "name": "minimal",
+            "description": "A minimal tool",
+            "parameters": {}
+        })];
+
+        let result = serialize_tool_definitions(&tools);
+        assert!(result.contains("minimal: A minimal tool"));
+    }
+
+    #[test]
+    fn test_serialize_tool_definitions_includes_call_format() {
+        let tools = vec![json!({
+            "name": "tap",
+            "description": "Tap",
+            "parameters": { "type": "object", "properties": { "x": { "type": "integer", "description": "X" } }, "required": ["x"] }
+        })];
+
+        let result = serialize_tool_definitions(&tools);
+        assert!(result.contains("__"));
+        assert!(result.contains("\"name\": \"tool_name\""));
+        assert!(result.contains("\"arguments\""));
+    }
+
+    // === Chat with tools integration tests ===
+
+    #[tokio::test]
+    async fn test_local_provider_chat_includes_tools_in_prompt() {
+        // Use a custom call_fn that captures the prompt so we can verify
+        let captured_prompt: std::sync::Arc<std::sync::Mutex<String>> =
+            std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_clone = captured_prompt.clone();
+
+        let provider = LocalProvider::with_fn(Arc::new(move |input: String| {
+            let mut guard = captured_clone.lock().unwrap();
+            *guard = input.clone();
+            Ok("I'll check the battery. __{\"name\": \"get_device_info\", \"arguments\": {}}__".to_string())
+        }));
+
+        let tools = vec![json!({
+            "name": "get_device_info",
+            "description": "Get device information.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        })];
+
+        let messages = vec![
+            ChatMessage::System("You are a phone assistant.".to_string()),
+            ChatMessage::User("How much battery?".to_string()),
+        ];
+
+        let response = provider.chat(messages, tools).await.unwrap();
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "get_device_info");
+
+        // Verify the prompt includes tool definitions
+        let prompt = captured_prompt.lock().unwrap().clone();
+        assert!(prompt.contains("You have access to the following tools:"), "Prompt should contain tool definitions header");
+        assert!(prompt.contains("get_device_info"), "Prompt should contain tool name");
+        assert!(prompt.contains("User: How much battery?"), "Prompt should contain user message");
+    }
+
+    #[tokio::test]
+    async fn test_local_provider_chat_no_tools_no_tool_section() {
+        let captured_prompt: std::sync::Arc<std::sync::Mutex<String>> =
+            std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_clone = captured_prompt.clone();
+
+        let provider = LocalProvider::with_fn(Arc::new(move |input: String| {
+            let mut guard = captured_clone.lock().unwrap();
+            *guard = input.clone();
+            Ok("No tools needed.".to_string())
+        }));
+
+        let messages = vec![ChatMessage::User("Hello".to_string())];
+        let response = provider.chat(messages, vec![]).await.unwrap();
+        assert!(response.text.is_some());
+
+        // Verify the prompt does NOT include tool definitions when none provided
+        let prompt = captured_prompt.lock().unwrap().clone();
+        assert!(!prompt.contains("You have access to the following tools:"), "Prompt should not contain tool section when no tools");
+    }
+
+    #[tokio::test]
+    async fn test_local_provider_chat_tools_from_registry_format() {
+        // Simulate the format used by loop_runner (same as how tools are passed)
+        let captured_prompt: std::sync::Arc<std::sync::Mutex<String>> =
+            std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_clone = captured_prompt.clone();
+
+        let provider = LocalProvider::with_fn(Arc::new(move |input: String| {
+            let mut guard = captured_clone.lock().unwrap();
+            *guard = input.clone();
+            Ok("Tapping now. __{\"name\": \"tap\", \"arguments\": {\"x\": 540, \"y\": 960}}__".to_string())
+        }));
+
+        // Build tools in the same format as loop_runner
+        let tools = vec![
+            json!({
+                "name": "tap",
+                "description": "Tap on the screen at the specified coordinates.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "integer", "description": "X coordinate to tap" },
+                        "y": { "type": "integer", "description": "Y coordinate to tap" }
+                    },
+                    "required": ["x", "y"]
+                }
+            }),
+            json!({
+                "name": "get_device_info",
+                "description": "Get device information.",
+                "parameters": { "type": "object", "properties": {}, "required": [] }
+            }),
+        ];
+
+        let messages = vec![ChatMessage::User("Tap center of screen".to_string())];
+        let response = provider.chat(messages, tools).await.unwrap();
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "tap");
+
+        let prompt = captured_prompt.lock().unwrap().clone();
+        // Tool defs should appear BEFORE the user messages
+        let tool_section_pos = prompt.find("You have access").unwrap_or(usize::MAX);
+        let user_msg_pos = prompt.find("User:").unwrap_or(0);
+        assert!(tool_section_pos < user_msg_pos, "Tool definitions should come before user messages in the prompt");
+        assert!(prompt.contains("1. tap:"));
+        assert!(prompt.contains("2. get_device_info:"));
+    }
+
+    #[test]
+    fn test_serialize_tool_definitions_max_tools_truncation() {
+        // Build more than MAX_TOOLS_IN_PROMPT tools
+        let tools: Vec<Value> = (0..35)
+            .map(|i| {
+                json!({
+                    "name": format!("tool_{}", i),
+                    "description": format!("Tool number {}", i),
+                    "parameters": { "type": "object", "properties": {}, "required": [] }
+                })
+            })
+            .collect();
+
+        let result = serialize_tool_definitions(&tools);
+        // Should contain tools up to MAX_TOOLS_IN_PROMPT (30)
+        assert!(result.contains("tool_0"));
+        assert!(result.contains("tool_29"));
+        // Tool 30 (index 30) should be truncated
+        assert!(!result.contains("tool_30"));
     }
 }
