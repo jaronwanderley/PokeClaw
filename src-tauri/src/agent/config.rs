@@ -4,10 +4,46 @@
 //! Configuration for the agent loop runner.
 
 /// Default system prompt for local device tasks (ported from Kotlin LOCAL_TASK_PROMPT).
+///
+/// Includes tool calling instructions so Gemma 4 and similar local models know
+/// how to invoke tools using the `__(json)__` format that the parser supports.
+/// The prompt is written in English but instructs the model to reply in the
+/// user's language (PT, EN, etc.).
 pub const LOCAL_TASK_PROMPT: &str = r#"You are PokeClaw, an AI agent that controls mobile devices to complete tasks for the user.
 
+Always reply in the same language the user writes in (Portuguese, English, etc.).
+
 ## Your capabilities
-You can tap, swipe, type text, press system keys, take screenshots, open apps, and interact with any UI element on the device.
+You can tap, swipe, type text, press system keys, take screenshots, open apps, and interact with any UI element on the device. You do this by calling tools.
+
+## How to call tools
+When you need to perform an action, output a tool call using this exact format:
+
+__{"name": "tool_name", "arguments": {"param": "value"}}__
+
+The double-underscore markers are required. The content inside must be valid JSON with "name" and "arguments" keys.
+
+You can output a brief thought before the tool call, then the tool call on its own line. Only call ONE tool per turn.
+
+### Tool call examples
+
+To tap the center of the screen:
+__{"name": "tap", "arguments": {"x": 540, "y": 960}}__
+
+To type text into a field:
+__{"name": "input_text", "arguments": {"text": "Hello world"}}__
+
+To get device battery and memory info:
+__{"name": "get_device_info", "arguments": {}}__
+
+To open an app:
+__{"name": "open_app", "arguments": {"app_name": "WhatsApp"}}__
+
+To finish a task successfully:
+__{"name": "finish", "arguments": {"success": true, "summary": "Sent message to Mom on WhatsApp"}}__
+
+To finish when you cannot complete the task:
+__{"name": "finish", "arguments": {"success": false, "summary": "Could not find the contacts app"}}__
 
 ## Guidelines
 1. Before acting, always check the current screen state using get_screen_info or find_node_info.
@@ -18,10 +54,12 @@ You can tap, swipe, type text, press system keys, take screenshots, open apps, a
 6. If you cannot complete the task, use "finish" with success=false and explain why.
 
 ## Important rules
-- Never assume what's on screen. Always verify before acting.
+- Never assume what is on screen. Always verify before acting.
 - Do not repeat the same action more than twice without trying something different.
 - Keep track of your progress and adjust your strategy as needed.
-- Be efficient — minimize unnecessary actions."#;
+- Be efficient — minimize unnecessary actions.
+- Always call exactly one tool per response. Do not call multiple tools at once.
+- Never describe a tool call in plain text. Use the __(json)__ format shown above."#;
 
 /// Configuration for the agent loop.
 #[derive(Debug, Clone)]
@@ -78,6 +116,69 @@ mod tests {
         assert!(!LOCAL_TASK_PROMPT.is_empty());
         assert!(LOCAL_TASK_PROMPT.contains("PokeClaw"));
         assert!(LOCAL_TASK_PROMPT.contains("finish"));
+    }
+
+    #[test]
+    fn local_task_prompt_contains_tool_calling_instructions() {
+        // Verify the prompt includes the __...__ tool call format
+        assert!(
+            LOCAL_TASK_PROMPT.contains("__"),
+            "Prompt should teach the __...__ tool call format"
+        );
+        assert!(
+            LOCAL_TASK_PROMPT.contains("\"name\""),
+            "Prompt should show JSON 'name' key in tool call examples"
+        );
+        assert!(
+            LOCAL_TASK_PROMPT.contains("\"arguments\""),
+            "Prompt should show JSON 'arguments' key in tool call examples"
+        );
+    }
+
+    #[test]
+    fn local_task_prompt_contains_tool_call_examples() {
+        // Verify specific tool call examples are present
+        assert!(
+            LOCAL_TASK_PROMPT.contains("tap"),
+            "Prompt should include tap example"
+        );
+        assert!(
+            LOCAL_TASK_PROMPT.contains("get_device_info"),
+            "Prompt should include get_device_info example"
+        );
+        assert!(
+            LOCAL_TASK_PROMPT.contains("input_text"),
+            "Prompt should include input_text example"
+        );
+        assert!(
+            LOCAL_TASK_PROMPT.contains("open_app"),
+            "Prompt should include open_app example"
+        );
+    }
+
+    #[test]
+    fn local_task_prompt_bilingual_support() {
+        // Verify the prompt instructs the model to respond in the user's language
+        assert!(
+            LOCAL_TASK_PROMPT.contains("Portuguese"),
+            "Prompt should mention Portuguese for bilingual support"
+        );
+        assert!(
+            LOCAL_TASK_PROMPT.contains("English"),
+            "Prompt should mention English for bilingual support"
+        );
+        assert!(
+            LOCAL_TASK_PROMPT.contains("language"),
+            "Prompt should mention language matching"
+        );
+    }
+
+    #[test]
+    fn local_task_prompt_enforces_single_tool_per_turn() {
+        assert!(
+            LOCAL_TASK_PROMPT.contains("one tool per"),
+            "Prompt should enforce one tool call per turn"
+        );
     }
 
     #[test]
